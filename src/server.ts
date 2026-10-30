@@ -13,18 +13,28 @@ import type { PassService } from './pass'
 
 export const MAX_PROMPT = 2000
 export const PASS_SATS = 500
+const CHALLENGE_TTL_MS = 5 * 60_000
 
 const isPrompt = (p: unknown): p is string => typeof p === 'string' && p.length > 0 && p.length <= MAX_PROMPT
 const isBid = (b: unknown): b is number => typeof b === 'number' && Number.isInteger(b) && b > 0
 const isTxid = (t: unknown): t is string => typeof t === 'string' && /^[0-9a-f]{64}$/.test(t)
 /** The auth middleware runs without allowUnauthenticated, so every handler after it has a caller. */
 const callerOf = (req: Request): string => (req as AuthRequest).auth!.identityKey
-const labelFor = (body: any, identityKey: string): string =>
+const prefixOf = (raw: string): string | undefined => {
+  try { const p = JSON.parse(raw)?.derivationPrefix; return typeof p === 'string' ? p : undefined } catch { return undefined }
+}
+const labelFor =(body: any, identityKey: string): string =>
   typeof body?.label === 'string' && body.label.length > 0 ? body.label.slice(0, 24) : identityKey.slice(0, 8)
 
 export function createSurgeApp (provider: WalletInterface, market: Market, passes?: PassService): Express {
   const app = express()
   app.use(express.json())
+
+  // Derivation prefix of each /job 402 challenge → surge price when issued.
+  const challenges = new Map<string, { priceSats: number, at: number }>()
+  const pruneChallenges = (): void => {
+    for (const [p, c] of challenges) { if (Date.now() - c.at <= CHALLENGE_TTL_MS) break; challenges.delete(p) }
+  }
 
   // Free routes: plain fetch works (dashboard, agents reading the price).
   app.get('/price', (_req, res) => {
@@ -56,10 +66,25 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     const { prompt, bid } = req.body ?? {}
     if (!isPrompt(prompt)) return res.status(400).json({ error: 'bad prompt' })
     if (!isBid(bid)) return res.status(400).json({ error: 'bad bid' })
-    // The challenge must meet the live surge price; the paid retry only the base,
-    // because the surge may have risen while the caller was paying.
-    const floor = req.headers['x-bsv-payment'] === undefined ? market.price() : market.cfg.baseSats
+    // The challenge must meet the live surge price. The paid retry must meet the
+    // price when ITS challenge was issued (the surge may have risen while the
+    // caller was paying). Each challenge prices one retry; an unknown or reused
+    // prefix pays the live price, so an old cheap challenge cannot skip the surge.
+    pruneChallenges()
+    const raw = req.headers['x-bsv-payment']
+    let floor = market.price()
+    if (typeof raw === 'string') {
+      const prefix = prefixOf(raw)
+      const issued = prefix === undefined ? undefined : challenges.get(prefix)
+      if (issued !== undefined) { challenges.delete(prefix!); floor = issued.priceSats }
+    }
     if (bid < floor) return res.status(400).json({ error: 'bid below surge price', priceSats: market.price() })
+    if (raw === undefined) {
+      res.on('finish', () => {
+        const p = res.getHeader('x-bsv-payment-derivation-prefix')
+        if (res.statusCode === 402 && typeof p === 'string') challenges.set(p, { priceSats: floor, at: Date.now() })
+      })
+    }
     next()
   })
   app.post(['/pass', '/job/pass'], (_req, res, next) => {

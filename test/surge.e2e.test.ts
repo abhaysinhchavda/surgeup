@@ -126,32 +126,52 @@ describe('paid jobs', () => {
     expect(market.get(doneB.id)!.doneAt!).toBeLessThan(market.get(doneA.id)!.doneAt!)
   })
 
-  it('paid retry is accepted after surge rises', async () => {
-    const body = { prompt: 'x', bid: 100 }
-    // Get the 402 challenge without letting AuthFetch pay it (as in the kit's replay test).
+  /** Get the 402 challenge without letting AuthFetch pay it (as in the kit's replay test). */
+  const challengeFor = async (body: object): Promise<{ derivationPrefix: string, serverKey: string }> => {
     const probe = new AuthFetch(alice)
     ;(probe as any).handlePaymentAndRetry = async (_u: string, _c: unknown, r: Response) => r
     const challenge = await probe.fetch(`${url}/job`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     expect(challenge.status).toBe(402)
-    const derivationPrefix = challenge.headers.get('x-bsv-payment-derivation-prefix')!
-    const serverKey = challenge.headers.get('x-bsv-auth-identity-key')!
-
-    // The surge rises while the caller is paying.
-    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
-    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
-    expect(market.price()).toBe(200)
-
+    return { derivationPrefix: challenge.headers.get('x-bsv-payment-derivation-prefix')!, serverKey: challenge.headers.get('x-bsv-auth-identity-key')! }
+  }
+  /** Pay a challenge by hand and retry with the payment header. */
+  const payRetry = async (body: { bid: number }, c: { derivationPrefix: string, serverKey: string }): Promise<Response> => {
     const derivationSuffix = Utils.toBase64(Random(32))
-    const { publicKey } = await alice.getPublicKey({ protocolID: [2, '3241645161d8'], keyID: `${derivationPrefix} ${derivationSuffix}`, counterparty: serverKey })
+    const { publicKey } = await alice.getPublicKey({ protocolID: [2, '3241645161d8'], keyID: `${c.derivationPrefix} ${derivationSuffix}`, counterparty: c.serverKey })
     const created = await alice.createAction({
       description: 'Pay for a SurgeAPI job',
-      outputs: [{ satoshis: 100, lockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex(), outputDescription: 'HTTP request payment' }],
+      outputs: [{ satoshis: body.bid, lockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex(), outputDescription: 'HTTP request payment' }],
       options: { randomizeOutputs: false }
     })
-    const header = JSON.stringify({ derivationPrefix, derivationSuffix, transaction: Utils.toBase64(Array.from(created.tx!)) })
-    const res = await post(alice, '/job', body, { 'x-bsv-payment': header })
+    const header = JSON.stringify({ derivationPrefix: c.derivationPrefix, derivationSuffix, transaction: Utils.toBase64(Array.from(created.tx!)) })
+    return await post(alice, '/job', body, { 'x-bsv-payment': header })
+  }
+  const raiseSurge = (): void => {
+    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
+    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
+    expect(market.price()).toBeGreaterThanOrEqual(200)
+  }
+
+  it('paid retry is accepted after surge rises', async () => {
+    const body = { prompt: 'x', bid: 100 }
+    const c = await challengeFor(body)
+    raiseSurge() // while the caller is paying
+    const res = await payRetry(body, c)
     expect(res.status).toBe(200)
     expect((await res.json()).paidSats).toBe(100)
+  })
+
+  it('a used cheap challenge cannot skip a later surge', async () => {
+    const body = { prompt: 'x', bid: 100 }
+    const c = await challengeFor(body)
+    expect((await payRetry(body, c)).status).toBe(200)
+    raiseSurge()
+    // Same prefix again, below the live price. Refused before payment is read, so
+    // no real tx (a real one would leave alice's wallet with an unaccepted parent).
+    const header = JSON.stringify({ derivationPrefix: c.derivationPrefix, derivationSuffix: 'AAAA', transaction: 'AAAA' })
+    const res = await post(alice, '/job', body, { 'x-bsv-payment': header })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('bid below surge price')
   })
 })
 
