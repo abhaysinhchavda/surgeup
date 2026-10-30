@@ -158,15 +158,15 @@ Middleware order: `express.json()` → free GET routes → `createAuthMiddleware
 
 **Files:** `src/wallet.ts`, `src/main.ts`, `scripts/keygen.ts`, `scripts/fund.ts`
 
-- `makeServerWallet (rootKeyHex: string, filePath: string): Promise<Wallet>` — guide §14.2 verbatim (Arcade first, `StorageKnex` on `Setup.createSQLiteKnex(filePath)`, `Monitor.addDefaultTasks()`, `void monitor.startTasks()`); creates `.local/`. Files: `.local/provider.sqlite`, `.local/agent-{a,b,c,llm}.sqlite`.
+- `makeServerWallet (rootKeyHex: string, filePath: string): Promise<Wallet>` — `Setup.createWalletSQLite` on mainnet (guide §14.1; the §14.2 manual build hits the SDK ESM/CJS `CachedKeyDeriver` type clash), `void monitor.startTasks()`; creates `.local/`. Helpers: `walletFromEnv(envVar)` (validates 64-hex key), `walletFileFor(envVar)`, `spendableSats(wallet)`. Files: `.local/provider.sqlite`, `.local/agent-{a,b,c,llm}.sqlite`.
 - `main.ts`: provider wallet from `PROVIDER_KEY`; `Market({ baseSats: 100, k: 0.5 })`; `createSurgeApp(provider, market, PASS_TOKEN_ID ? await createPassService(...) : undefined)` (T8); listen 3000; `startWorker(market, mockRunJob(2000))`; log provider **identity key** only.
 - `keygen.ts`: append any missing `PROVIDER_KEY`, `AGENT_A_KEY`, `AGENT_B_KEY`, `AGENT_C_KEY`, `AGENT_LLM_KEY` = `PrivateKey.fromRandom().toHex()`; never overwrite; never print keys; print names + identity keys.
 - `fund.ts [satsPerAgent=10000]`: `WalletClient('auto', 'surgeapi.local')`, `waitForAuthentication`; for A, B, C, LLM: `createBrc29Payment(desktop, agentIdentityKey, sats, 'Fund SurgeAPI agent', 'surgeapi.local')` → `acceptBrc29Payment(agentWallet, p)`; print name, WhatsOnChain link, balance.
 
-- [ ] Implement; `npm run typecheck` + `npm test` green.
-- [ ] `npm run keygen` → `.env` written; `git status` shows no `.env` / `.local/`.
+- [x] Implement; `npm run typecheck` + `npm test` green.
+- [x] `npm run keygen` → `.env` written; `git status` shows no `.env` / `.local/`.
 - [ ] **Team OK + BSV Desktop approval:** `npm run fund -- 10000` → 4 links, each agent 10000 sats.
-- [ ] `npm run server`; `curl http://localhost:3000/price` → `{"priceSats":100,"queueDepth":0,"passSats":500}`.
+- [x] `npm run server`; `curl http://localhost:3000/price` → `{"priceSats":100,"queueDepth":0,"passSats":500}`.
 - [ ] Commit `feat: mainnet wallets, keygen, funding`.
 
 ## P2 — Agents
