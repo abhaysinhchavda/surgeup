@@ -17,6 +17,7 @@
     "fund": "tsx --env-file=.env scripts/fund.ts",
     "deploy-pass": "tsx --env-file=.env scripts/deployPass.ts",
     "resell": "tsx --env-file=.env scripts/resell.ts",
+    "pass": "tsx --env-file=.env scripts/pass.ts",
     "web": "vite web",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

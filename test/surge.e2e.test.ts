@@ -68,6 +68,7 @@ afterEach(() => {
 describe('pricing and validation', () => {
   it('price endpoint starts at base', async () => {
     expect(await getJson('/price')).toEqual({ priceSats: 100, queueDepth: 0, passSats: 500 })
+    expect(await getJson('/provider')).toEqual({ identityKey: (await provider.getPublicKey({ identityKey: true })).publicKey })
   })
 
   it('rejects a bid below surge without charging', async () => {

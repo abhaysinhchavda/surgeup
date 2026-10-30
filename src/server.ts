@@ -41,6 +41,10 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     res.json({ priceSats: market.price(), queueDepth: market.snapshot().queueDepth, passSats: PASS_SATS })
   })
   app.get('/state', (_req, res) => { res.json(market.snapshot()) })
+  // Pass holders send their pass back to this key before POST /job/pass.
+  app.get('/provider', async (_req, res) => {
+    res.json({ identityKey: (await provider.getPublicKey({ identityKey: true })).publicKey })
+  })
   app.get('/job/:id', (req, res) => {
     const job = market.get(req.params.id)
     if (job === undefined) return res.status(404).json({ error: 'not found' })
