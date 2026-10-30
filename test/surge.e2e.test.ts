@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { createServer, type Server } from 'node:http'
 import { AuthFetch, P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import type { Wallet } from '@bsv/wallet-toolbox'
+import { runAgent } from '../src/agent'
 import { Market } from '../src/market'
 import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
 import type { PassService } from '../src/pass'
@@ -172,6 +173,15 @@ describe('paid jobs', () => {
     const res = await post(alice, '/job', body, { 'x-bsv-payment': header })
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('bid below surge price')
+  })
+
+  it('a high-urgency agent pays 3× the live surge', async () => {
+    raiseSurge()
+    const price = market.price()
+    await runAgent({ name: 'T', urgency: 'high', wallet: alice, baseUrl: url, jobs: 1, gapMs: 0 })
+    const s = market.snapshot()
+    const job = [...s.queue, ...(s.running === undefined ? [] : [s.running]), ...s.served].find(j => j.label === 'Agent T (high)')
+    expect(job?.paidSats).toBe(price * 3)
   })
 })
 
