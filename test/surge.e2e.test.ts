@@ -1,0 +1,176 @@
+/**
+ * SurgeAPI server end to end on the mock chain: real wallet-toolbox wallets,
+ * real BRC-103/104 auth and BRC-105 payments.
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import { AuthFetch, P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
+import type { Wallet } from '@bsv/wallet-toolbox'
+import { Market } from '../src/market'
+import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
+import type { PassService } from '../src/pass'
+import { createMockChain, type MockChain } from './helpers/mockchain'
+
+const PORT = 18100
+const url = `http://localhost:${PORT}`
+const GOOD_PASS = 'a'.repeat(64)
+const fakePasses: PassService = {
+  issue: async () => ({ txid: 'f'.repeat(64) }),
+  redeem: async txid => txid === GOOD_PASS
+}
+
+let chain: MockChain
+let provider: Wallet, alice: Wallet, bob: Wallet
+let market: Market, server: Server, worker: { stop: () => void } | undefined
+
+const spendableSats = async (w: Wallet): Promise<number> =>
+  (await w.listOutputs({ basket: 'default', limit: 1000 })).outputs.filter(o => o.spendable).reduce((s, o) => s + o.satoshis, 0)
+const post = async (wallet: Wallet, path: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> =>
+  await new AuthFetch(wallet).fetch(url + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
+const getJson = async (path: string): Promise<any> => await (await fetch(url + path)).json()
+const waitDone = async (id: string): Promise<any> => {
+  for (let i = 0; i < 100; i++) {
+    const job = await getJson(`/job/${id}`)
+    if (job.status === 'done') return job
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error(`job ${id} never finished`)
+}
+
+// One long-lived server; each test swaps in a fresh app (restarting the server
+// per test leaves fetch's keep-alive sockets dangling → ECONNRESET).
+let app: (req: any, res: any) => void
+
+beforeAll(async () => {
+  server = await new Promise(resolve => { const s = createServer((req, res) => app(req, res)).listen(PORT, () => resolve(s)) })
+  chain = await createMockChain()
+  ;[provider, alice, bob] = await Promise.all([chain.makeWallet(), chain.makeWallet(), chain.makeWallet()])
+  await chain.fund(alice) // sequential: parallel funding mines two identical mock blocks
+  await chain.fund(bob)
+})
+afterAll(async () => {
+  server.closeAllConnections()
+  await new Promise(resolve => server.close(resolve))
+  await chain?.close()
+})
+
+beforeEach(() => {
+  market = new Market({ baseSats: 100, k: 0.5 })
+  app = createSurgeApp(provider, market, fakePasses)
+})
+afterEach(() => {
+  worker?.stop()
+  worker = undefined
+})
+
+describe('pricing and validation', () => {
+  it('price endpoint starts at base', async () => {
+    expect(await getJson('/price')).toEqual({ priceSats: 100, queueDepth: 0, passSats: 500 })
+  })
+
+  it('rejects a bid below surge without charging', async () => {
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/job', { prompt: 'x', bid: 50 })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'bid below surge price', priceSats: 100 })
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('rejects malformed bids', async () => {
+    const before = await spendableSats(provider)
+    for (const bid of ['abc', -5, 150.5, '200', undefined]) {
+      const res = await post(alice, '/job', { prompt: 'x', bid })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'bad bid' })
+    }
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('rejects bad prompts', async () => {
+    for (const prompt of ['', 'a'.repeat(2001), undefined]) {
+      const res = await post(alice, '/job', { prompt, bid: 150 })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'bad prompt' })
+    }
+  })
+
+  it('unknown job is 404', async () => {
+    const res = await fetch(`${url}/job/nope`)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'not found' })
+  })
+})
+
+describe('paid jobs', () => {
+  it('charges the bid and returns a job', async () => {
+    worker = startWorker(market, mockRunJob(50), 10)
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/job', { prompt: 'hello', bid: 150 })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.paidSats).toBe(150)
+    expect(body.txid).toMatch(/^[0-9a-f]{64}$/)
+    expect(typeof body.jobId).toBe('string')
+    expect(await spendableSats(provider)).toBe(before + 150)
+    const done = await waitDone(body.jobId)
+    expect(done.result).toContain('hello')
+  })
+
+  it('higher later bid is served first', async () => {
+    const a = await (await post(alice, '/job', { prompt: 'A', bid: 100 })).json()
+    const b = await (await post(bob, '/job', { prompt: 'B', bid: 400 })).json()
+    const state = await getJson('/state')
+    expect(state.queue.map((j: any) => j.id)).toEqual([b.jobId, a.jobId])
+    worker = startWorker(market, mockRunJob(50), 10)
+    const [doneA, doneB] = [await waitDone(a.jobId), await waitDone(b.jobId)]
+    expect(market.get(doneB.id)!.doneAt!).toBeLessThan(market.get(doneA.id)!.doneAt!)
+  })
+
+  it('paid retry is accepted after surge rises', async () => {
+    const body = { prompt: 'x', bid: 100 }
+    // Get the 402 challenge without letting AuthFetch pay it (as in the kit's replay test).
+    const probe = new AuthFetch(alice)
+    ;(probe as any).handlePaymentAndRetry = async (_u: string, _c: unknown, r: Response) => r
+    const challenge = await probe.fetch(`${url}/job`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    expect(challenge.status).toBe(402)
+    const derivationPrefix = challenge.headers.get('x-bsv-payment-derivation-prefix')!
+    const serverKey = challenge.headers.get('x-bsv-auth-identity-key')!
+
+    // The surge rises while the caller is paying.
+    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
+    market.enqueue({ caller: 'x', label: 'x', prompt: 'x', paidSats: 1, txid: 'x' })
+    expect(market.price()).toBe(200)
+
+    const derivationSuffix = Utils.toBase64(Random(32))
+    const { publicKey } = await alice.getPublicKey({ protocolID: [2, '3241645161d8'], keyID: `${derivationPrefix} ${derivationSuffix}`, counterparty: serverKey })
+    const created = await alice.createAction({
+      description: 'Pay for a SurgeAPI job',
+      outputs: [{ satoshis: 100, lockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex(), outputDescription: 'HTTP request payment' }],
+      options: { randomizeOutputs: false }
+    })
+    const header = JSON.stringify({ derivationPrefix, derivationSuffix, transaction: Utils.toBase64(Array.from(created.tx!)) })
+    const res = await post(alice, '/job', body, { 'x-bsv-payment': header })
+    expect(res.status).toBe(200)
+    expect((await res.json()).paidSats).toBe(100)
+  })
+})
+
+describe('priority pass', () => {
+  it('buying a pass charges PASS_SATS', async () => {
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/pass', {})
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ passTxid: 'f'.repeat(64) })
+    expect(await spendableSats(provider)).toBe(before + 500)
+  })
+
+  it('a valid pass jumps the queue; a bad one is refused', async () => {
+    await post(bob, '/job', { prompt: 'rich', bid: 900 })
+    const ok = await post(alice, '/job/pass', { prompt: 'vip', passTxid: GOOD_PASS })
+    expect(ok.status).toBe(200)
+    expect((await ok.json()).position).toBe(1)
+    const bad = await post(alice, '/job/pass', { prompt: 'vip', passTxid: 'b'.repeat(64) })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'invalid pass' })
+  })
+})
