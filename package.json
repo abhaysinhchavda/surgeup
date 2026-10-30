@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@bsv/402-pay": "^0.3.3",
     "@bsv/auth-express-middleware": "^2.2.9",
     "@bsv/overlay": "^2.6.4",

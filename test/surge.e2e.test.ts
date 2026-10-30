@@ -7,6 +7,7 @@ import { createServer, type Server } from 'node:http'
 import { AuthFetch, P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import type { Wallet } from '@bsv/wallet-toolbox'
 import { runAgent } from '../src/agent'
+import { runLlmAgent } from '../src/llmAgent'
 import { Market } from '../src/market'
 import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
 import type { PassService } from '../src/pass'
@@ -182,6 +183,25 @@ describe('paid jobs', () => {
     const s = market.snapshot()
     const job = [...s.queue, ...(s.running === undefined ? [] : [s.running]), ...s.served].find(j => j.label === 'Agent T (high)')
     expect(job?.paidSats).toBe(price * 3)
+  })
+
+  it('the LLM agent cannot spend past its budget', async () => {
+    // Scripted stand-in for Claude: two 300-sat purchases against a 500-sat budget.
+    const replies = [
+      { stop_reason: 'tool_use', content: [{ type: 'text', text: 'Urgent, buying now.' }, { type: 'tool_use', id: 't1', name: 'submit_job', input: { prompt: 'a', bid: 300 } }] },
+      { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't2', name: 'submit_job', input: { prompt: 'b', bid: 300 } }] },
+      { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] }
+    ]
+    const sent: any[] = []
+    const client = { messages: { create: async (p: any) => { sent.push(JSON.parse(JSON.stringify(p.messages))); return replies.shift() } } }
+    await runLlmAgent({ wallet: alice, baseUrl: url, tasks: [{ prompt: 'a', deadlineSec: 10, valueSats: 300 }], budgetSats: 500, client: client as any })
+
+    const s = market.snapshot()
+    const llmJobs = [...s.queue, ...(s.running === undefined ? [] : [s.running]), ...s.served].filter(j => j.label === 'LLM agent')
+    expect(llmJobs.map(j => j.paidSats)).toEqual([300])
+    const refused = sent[2].at(-1).content[0]
+    expect(refused.is_error).toBe(true)
+    expect(refused.content).toContain('over budget')
   })
 })
 
