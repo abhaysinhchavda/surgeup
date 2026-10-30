@@ -5,7 +5,7 @@ import { createPassService } from './pass'
 import { createSurgeApp, mockRunJob, startWorker } from './server'
 import { walletFromEnv } from './wallet'
 
-const PORT = 3000
+const PORT = Number(process.env.PORT ?? 3000) // hosts inject PORT
 
 const provider = await walletFromEnv('PROVIDER_KEY')
 const { publicKey } = await provider.getPublicKey({ identityKey: true })

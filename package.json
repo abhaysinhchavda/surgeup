@@ -9,6 +9,7 @@
   },
   "scripts": {
     "server": "tsx --env-file=.env src/main.ts",
+    "start": "tsx src/main.ts",
     "overlay": "tsx src/kit/overlay/server.ts",
     "agent": "tsx --env-file=.env src/agent.ts",
     "llm-agent": "tsx --env-file=.env src/llmAgent.ts",
