@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SurgeAPI</title>
+  <style>
+    :root {
+      --bg: #f6f5f1; --panel: #ffffff; --ink: #1c1b18; --muted: #6b6860; --line: #e2dfd6;
+      --accent: #c2410c; --accent-ink: #ffffff; --ok: #15803d; --err: #b91c1c;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14130f; --panel: #1d1c18; --ink: #ecebe6; --muted: #9c998f; --line: #2e2c26;
+        --accent: #f97316; --accent-ink: #14130f; --ok: #4ade80; --err: #f87171;
+        color-scheme: dark;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
+    h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+    .price { display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }
+    .price .big { font-size: 64px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent); }
+    .price .unit { font-size: 18px; color: var(--muted); margin-left: 6px; }
+    .stat { color: var(--muted); }
+    .stat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .price .big { font-size: 48px; } }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    th { font-size: 12px; color: var(--muted); font-weight: 600; }
+    td.empty { color: var(--muted); text-align: center; padding: 16px; }
+    tr.running td { color: var(--accent); }
+    .pass { font-weight: 700; color: var(--ok); }
+    a { color: var(--accent); }
+    form { display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; }
+    @media (max-width: 720px) { form { grid-template-columns: 1fr; } }
+    input, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0; }
+    button { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+    #msg { margin: 10px 0 0; min-height: 1.5em; }
+    #msg.err { color: var(--err); }
+    #result { white-space: pre-wrap; margin: 8px 0 0; padding: 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+    #result:empty { display: none; }
+    #status { color: var(--err); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>SurgeAPI · live priority market</h1>
+      <span id="status" role="status"></span>
+    </header>
+
+    <section class="panel price" aria-label="Current price">
+      <div><span class="big" id="price">–</span><span class="unit">sats / call</span></div>
+      <div class="stat">Queue depth <b id="depth">–</b></div>
+    </section>
+
+    <section class="panel" aria-label="Pay for a job">
+      <h2>Your job</h2>
+      <form id="form">
+        <label>Prompt <input id="prompt" required maxlength="2000" value="Summarise today's incident report"></label>
+        <label>Bid (sats) <input id="bid" type="number" min="1" step="1" required></label>
+        <label>&nbsp;<button id="pay" type="submit">Pay with BSV Desktop</button></label>
+      </form>
+      <p id="msg" role="status"></p>
+      <pre id="result"></pre>
+    </section>
+
+    <div class="grid">
+      <section class="panel" aria-label="Queue">
+        <h2>Queue</h2>
+        <table>
+          <thead><tr><th>#</th><th>Caller</th><th>Paid</th></tr></thead>
+          <tbody id="queue"></tbody>
+        </table>
+      </section>
+      <section class="panel" aria-label="Served">
+        <h2>Served</h2>
+        <table>
+          <thead><tr><th>Caller</th><th>Paid</th><th>Wait</th><th>Tx</th></tr></thead>
+          <tbody id="served"></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>
