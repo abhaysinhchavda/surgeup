@@ -76,7 +76,8 @@ export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string
     const results: Anthropic.ToolResultBlockParam[] = []
     for (const b of res.content) {
       if (b.type !== 'tool_use') continue
-      const out = await runTool(b.name, b.input)
+      // A thrown tool (network, payment) goes back to the model as an error, not a crash.
+      const out = await runTool(b.name, b.input).catch(e => ({ body: { error: String(e) }, isError: true }))
       results.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(out.body), is_error: out.isError })
     }
     messages.push({ role: 'user', content: results })
