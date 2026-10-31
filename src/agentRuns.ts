@@ -59,7 +59,7 @@ export async function runScripted (o: { wallet: WalletInterface, baseUrl: string
         if (bid < r.body.priceSats || !guardBid(o.budget, bid).ok) { o.log('skip', `"${t.prompt}": surge jumped to ${r.body.priceSats}; skipped`); continue }
         r = await submitJob(o.wallet, o.baseUrl, t.prompt, bid, o.label)
       }
-      if (r.status !== 200) { o.log('error', `"${t.prompt}": refused (${r.status}) ${r.body?.error ?? ''}`); continue }
+      if (r.status !== 200) { o.log('error', `"${t.prompt}": refused (${r.status}) ${r.body?.error ?? r.body?.description ?? ''}`); continue }
       o.budget.spentSats += r.body.paidSats
       o.log('pay', `paid ${r.body.paidSats} sats, queue position ${r.body.position}`, r.body.txid)
     } catch (e) {

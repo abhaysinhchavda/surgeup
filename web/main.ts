@@ -262,7 +262,7 @@ el('run').addEventListener('click', () => {
         body: JSON.stringify({ domain: domainId, caseId, mode, budgetSats: Number(budgetInput.value) })
       })
       const body = await res.json()
-      if (!res.ok) { runMsg(body.error ?? `Request failed (HTTP ${res.status})`, true); return }
+      if (!res.ok) { runMsg(body.error ?? body.description ?? `Request failed (HTTP ${res.status})`, true); return }
       runMsg('Agent running: watch it bid in the log and the queue.')
       renderRun(body)
     } catch (e) {
@@ -314,7 +314,7 @@ el<HTMLFormElement>('form').addEventListener('submit', e => {
         body: JSON.stringify({ prompt, bid, label: 'You' })
       })
       const body = await res.json()
-      if (res.status !== 200) { say(body.error ?? `Request failed (HTTP ${res.status})`, true); return }
+      if (res.status !== 200) { say(body.error ?? body.description ?? `Request failed (HTTP ${res.status})`, true); return }
       say(`Paid ${body.paidSats} sats. Queued at position ${body.position}.`)
       await showResult(body.jobId)
     } catch (err) {

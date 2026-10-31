@@ -3,15 +3,9 @@
   "buildCommand": "npx vite build web",
   "outputDirectory": "web/dist",
   "rewrites": [
-    { "source": "/price", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/price" },
-    { "source": "/state", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/state" },
-    { "source": "/provider", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/provider" },
-    { "source": "/agents", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/agents" },
-    { "source": "/agents/run", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/agents/run" },
-    { "source": "/agents/wallet", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/agents/wallet" },
-    { "source": "/pass", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/pass" },
-    { "source": "/job", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/job" },
-    { "source": "/job/:id", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/job/:id" },
-    { "source": "/.well-known/:path*", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/.well-known/:path*" }
+    {
+      "source": "/:route(price|state|provider|agents|pass|job|\\.well-known)/:rest*",
+      "destination": "https://mean-components-hdtv-invest.trycloudflare.com/:route/:rest*"
+    }
   ]
 }
