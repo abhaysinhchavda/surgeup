@@ -5,7 +5,7 @@
  */
 import type { WalletInterface } from '@bsv/sdk'
 import { bidFor, submitJob, type Urgency } from './agent'
-import { findCase, type AgentCase } from './cases'
+import { DOMAINS, findCase, type AgentCase, type Domain } from './cases'
 import { guardBid, runLlmAgent, type Budget } from './llmAgent'
 
 export type Mode = 'scripted' | 'llm'
@@ -28,14 +28,16 @@ export type Log = (kind: LogKind, text: string, txid?: string) => void
 export const MAX_BUDGET = 2000
 const MODES: Mode[] = ['scripted', 'llm']
 
+export interface AgentSpec { domain: unknown, caseId: unknown, mode: unknown, budgetSats: unknown }
 export interface AgentRunner {
   llm: boolean
   tokenRequired: boolean
-  current: () => AgentRun | undefined
+  /** The latest batch: one run per selected agent. */
+  current: () => AgentRun[]
   checkToken: (token: unknown) => boolean
   wallet: () => Promise<WalletInterface>
-  /** Starts a run, or returns why it cannot start. */
-  start: (o: { domain: unknown, caseId: unknown, mode: unknown, budgetSats: unknown }) => AgentRun | { error: string, status: number }
+  /** Starts every agent in the batch at once, or returns why the batch cannot start. */
+  start: (agents: unknown) => AgentRun[] | { error: string, status: number }
 }
 
 const urgencyFor = (deadlineSec: number): Urgency => deadlineSec <= 60 ? 'high' : deadlineSec <= 300 ? 'medium' : 'low'
@@ -68,64 +70,93 @@ export async function runScripted (o: { wallet: WalletInterface, baseUrl: string
   }
 }
 
+/** Agents share one wallet: its createAction calls run one at a time so they never pick the same coins. */
+function serialized (w: WalletInterface): WalletInterface {
+  let tail: Promise<unknown> = Promise.resolve()
+  return new Proxy(w, {
+    get (target, prop) {
+      const v = (target as any)[prop]
+      if (typeof v !== 'function') return v
+      if (prop !== 'createAction') return v.bind(target)
+      return async (...args: unknown[]) => {
+        const r = tail.then(async () => await v.apply(target, args))
+        tail = r.catch(() => {})
+        return await r
+      }
+    }
+  })
+}
+
 export function createAgentRunner (o: { baseUrl: string, wallet: () => Promise<WalletInterface>, llm: boolean, token?: string }): AgentRunner {
-  let run: AgentRun | undefined
+  let runs: AgentRun[] = []
   let seq = 0
+  let shared: Promise<WalletInterface> | undefined
+  const wallet = async (): Promise<WalletInterface> => await (shared ??= o.wallet().then(serialized))
+
+  const validate = (a: AgentSpec): { error: string } | { domain: Domain, agentCase: AgentCase, mode: Mode, budgetSats: number } => {
+    const found = findCase(String(a?.domain), String(a?.caseId))
+    if (found === undefined) return { error: `unknown case ${String(a?.domain)}/${String(a?.caseId)}` }
+    if (!MODES.includes(a.mode as Mode)) return { error: 'bad mode' }
+    if (a.mode === 'llm' && !o.llm) return { error: 'Claude mode needs ANTHROPIC_API_KEY on the server' }
+    const b = a.budgetSats
+    if (typeof b !== 'number' || !Number.isInteger(b) || b <= 0 || b > MAX_BUDGET) return { error: `${found.domain.name}: budget must be 1–${MAX_BUDGET} sats` }
+    return { ...found, mode: a.mode as Mode, budgetSats: b }
+  }
+
+  const launch = (d: Domain, agentCase: AgentCase, mode: Mode, budgetSats: number): AgentRun => {
+    const r: AgentRun = {
+      id: String(++seq),
+      domain: d.id,
+      caseId: agentCase.id,
+      title: `${d.name} · ${agentCase.title}`,
+      mode,
+      status: 'running',
+      budgetSats,
+      spentSats: 0,
+      startedAt: Date.now(),
+      log: []
+    }
+    const budget: Budget = { limitSats: budgetSats, spentSats: 0 }
+    const log: Log = (kind, text, txid) => {
+      r.log.push({ at: Date.now(), kind, text, txid })
+      if (kind === 'pay') r.spentSats = budget.spentSats
+    }
+    const label = `${d.name} agent`
+    void (async () => {
+      try {
+        log('info', `${mode === 'llm' ? 'Claude' : 'Rule-based agent'} started with a ${budgetSats}-sat budget`)
+        const w = await wallet()
+        if (mode === 'llm') await runLlmAgent({ wallet: w, baseUrl: o.baseUrl, tasks: agentCase.tasks, budgetSats, label, log, budget })
+        else {
+          await runScripted({ wallet: w, baseUrl: o.baseUrl, agentCase, budget, label, log })
+          log('info', `spent ${budget.spentSats} of ${budgetSats} sats`)
+        }
+        r.spentSats = budget.spentSats
+        r.status = 'done'
+      } catch (e) {
+        log('error', String(e))
+        r.status = 'error'
+      }
+    })()
+    return r
+  }
 
   return {
     llm: o.llm,
     tokenRequired: o.token !== undefined && o.token !== '',
-    current: () => run,
+    current: () => runs,
     checkToken: token => o.token === undefined || o.token === '' || token === o.token,
-    wallet: o.wallet,
-    start: ({ domain, caseId, mode, budgetSats }) => {
-      if (run?.status === 'running') return { error: 'an agent run is already in progress', status: 409 }
-      const found = findCase(String(domain), String(caseId))
-      if (found === undefined) return { error: 'unknown case', status: 400 }
-      if (!MODES.includes(mode as Mode)) return { error: 'bad mode', status: 400 }
-      if (mode === 'llm' && !o.llm) return { error: 'Claude mode needs ANTHROPIC_API_KEY on the server', status: 503 }
-      if (typeof budgetSats !== 'number' || !Number.isInteger(budgetSats) || budgetSats <= 0 || budgetSats > MAX_BUDGET) {
-        return { error: `budget must be 1–${MAX_BUDGET} sats`, status: 400 }
-      }
-
-      const { domain: d, agentCase } = found
-      const r: AgentRun = {
-        id: String(++seq),
-        domain: d.id,
-        caseId: agentCase.id,
-        title: `${d.name} · ${agentCase.title}`,
-        mode: mode as Mode,
-        status: 'running',
-        budgetSats,
-        spentSats: 0,
-        startedAt: Date.now(),
-        log: []
-      }
-      run = r
-      const budget: Budget = { limitSats: budgetSats, spentSats: 0 }
-      const log: Log = (kind, text, txid) => {
-        r.log.push({ at: Date.now(), kind, text, txid })
-        if (kind === 'pay') r.spentSats = budget.spentSats
-      }
-      const label = `${d.name} agent`
-
-      void (async () => {
-        try {
-          log('info', `${mode === 'llm' ? 'Claude' : 'Rule-based agent'} started with a ${budgetSats}-sat budget`)
-          const wallet = await o.wallet()
-          if (mode === 'llm') await runLlmAgent({ wallet, baseUrl: o.baseUrl, tasks: agentCase.tasks, budgetSats, label, log, budget })
-          else {
-            await runScripted({ wallet, baseUrl: o.baseUrl, agentCase, budget, label, log })
-            log('info', `spent ${budget.spentSats} of ${budgetSats} sats`)
-          }
-          r.spentSats = budget.spentSats
-          r.status = 'done'
-        } catch (e) {
-          log('error', String(e))
-          r.status = 'error'
-        }
-      })()
-      return r
+    wallet,
+    start: agents => {
+      if (runs.some(r => r.status === 'running')) return { error: 'agents are already running', status: 409 }
+      if (!Array.isArray(agents) || agents.length === 0 || agents.length > DOMAINS.length) return { error: `select 1–${DOMAINS.length} agents`, status: 400 }
+      const specs = agents.map(validate)
+      const bad = specs.find(s => 'error' in s)
+      if (bad !== undefined) return { error: (bad as { error: string }).error, status: 400 }
+      const ok = specs as Array<Exclude<ReturnType<typeof validate>, { error: string }>>
+      if (new Set(ok.map(s => s.domain.id)).size !== ok.length) return { error: 'one agent per domain', status: 400 }
+      runs = ok.map(s => launch(s.domain, s.agentCase, s.mode, s.budgetSats))
+      return runs
     }
   }
 }

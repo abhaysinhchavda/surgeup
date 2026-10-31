@@ -122,52 +122,93 @@ async function pollMarket (): Promise<void> {
 
 // ---------- Agent console ----------
 
+interface Pick { on: boolean, caseId: string, mode: 'scripted' | 'llm', budgetSats: number }
+const STORE_KEY = 'surgeapi.roster'
 let domains: Domain[] = []
-let domainId = ''
-let caseId = ''
+let picks: Record<string, Pick> = {}
 let agentsEnabled = false
+let llmAvailable = false
+let walletSats: number | undefined
 
-function renderTabs (): void {
-  el('tabs').replaceChildren(...domains.map(d => {
-    const b = h('button', { type: 'button', className: 'tab', id: `tab-${d.id}` }, icon(d.id), d.name)
-    b.setAttribute('role', 'tab')
-    b.setAttribute('aria-selected', String(d.id === domainId))
-    b.tabIndex = d.id === domainId ? 0 : -1
-    b.addEventListener('click', () => { selectDomain(d.id) })
-    return b
+const savePicks = (): void => { try { localStorage.setItem(STORE_KEY, JSON.stringify(picks)) } catch {} }
+const loadPicks = (): Record<string, Pick> => { try { return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') } catch { return {} } }
+
+function renderRoster (): void {
+  el('roster').replaceChildren(...domains.map(d => {
+    const p = picks[d.id]
+    const c = d.cases.find(x => x.id === p.caseId) ?? d.cases[0]
+    const card = h('div', { className: `agent${p.on ? ' on' : ''}` })
+
+    const check = h('input', { type: 'checkbox', checked: p.on })
+    check.addEventListener('change', () => { p.on = check.checked; card.classList.toggle('on', p.on); changed() })
+    const amt = h('span', { className: 'amt num', textContent: `${p.budgetSats} sats` })
+    const head = h('label', { className: 'agent-head' }, check, icon(d.id), `${d.name} agent`, amt)
+
+    const select = h('select', {}, ...d.cases.map(x => h('option', { value: x.id, textContent: x.title, selected: x.id === c.id })))
+    select.setAttribute('aria-label', `${d.name} case`)
+    const brief = h('p', { className: 'brief', textContent: c.brief })
+    const chips = h('div', { className: 'chips' })
+    const renderChips = (ac: typeof c): void => {
+      chips.replaceChildren(...ac.tasks.map(t => {
+        const u = urgencyOf(t.deadlineSec)
+        return h('span', { className: `chip ${u}`, title: `${t.prompt} (worth up to ${t.valueSats} sats)`, textContent: `${u} · ${fmtDeadline(t.deadlineSec)}` })
+      }))
+    }
+    renderChips(c)
+    select.addEventListener('change', () => {
+      p.caseId = select.value
+      const ac = d.cases.find(x => x.id === p.caseId)!
+      brief.textContent = ac.brief
+      renderChips(ac)
+      changed()
+    })
+
+    const range = h('input', { type: 'range', min: '100', max: '2000', step: '50', value: String(p.budgetSats) })
+    range.setAttribute('aria-label', `${d.name} budget`)
+    range.addEventListener('input', () => { p.budgetSats = Number(range.value); amt.textContent = `${p.budgetSats} sats`; changed() })
+    const brain = h('div', { className: 'mini' })
+    brain.setAttribute('role', 'group')
+    brain.setAttribute('aria-label', `${d.name} brain`)
+    const modeBtn = (mode: Pick['mode'], text: string): HTMLButtonElement => {
+      const locked = mode === 'llm' && !llmAvailable
+      const b = h('button', { type: 'button', textContent: text, disabled: locked, title: locked ? 'Needs ANTHROPIC_API_KEY on the server' : '' })
+      b.setAttribute('aria-pressed', String(p.mode === mode))
+      b.addEventListener('click', () => { p.mode = mode; brain.querySelectorAll('button').forEach(x => { x.setAttribute('aria-pressed', String(x === b)) }); changed() })
+      return b
+    }
+    brain.append(modeBtn('scripted', 'Rules'), modeBtn('llm', 'Claude'))
+
+    card.append(head, select, brief, chips, h('div', { className: 'agent-foot' }, range, brain))
+    return card
   }))
-}
-// Arrow keys move between domain tabs (roving tabindex).
-el('tabs').addEventListener('keydown', e => {
-  const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
-  if (step === 0) return
-  e.preventDefault()
-  const i = domains.findIndex(d => d.id === domainId)
-  selectDomain(domains[(i + step + domains.length) % domains.length].id)
-  el(`tab-${domainId}`).focus()
-})
-
-function selectDomain (id: string): void {
-  domainId = id
-  const d = domains.find(x => x.id === id)!
-  if (!d.cases.some(c => c.id === caseId)) caseId = d.cases[0].id
-  renderTabs()
-  el('cases').replaceChildren(...d.cases.map(c => {
-    const input = h('input', { type: 'radio', name: 'case', value: c.id, checked: c.id === caseId })
-    input.addEventListener('change', () => { caseId = c.id })
-    const tasks = h('ul', { className: 'tasks' }, ...c.tasks.map(t => {
-      const u = urgencyOf(t.deadlineSec)
-      return h('li', {},
-        h('span', { title: t.prompt, textContent: t.prompt }),
-        h('span', { className: `chip ${u}`, textContent: `${u} · ${fmtDeadline(t.deadlineSec)}` }),
-        h('span', { className: 'worth num', textContent: `≤${t.valueSats}` }))
-    }))
-    return h('label', { className: 'case' }, input, h('b', { textContent: c.title }), h('p', { textContent: c.brief }), tasks)
-  }))
+  changed()
 }
 
-const budgetInput = el<HTMLInputElement>('budget')
-budgetInput.addEventListener('input', () => { el('budget-out').textContent = `${budgetInput.value} sats` })
+function changed (): void {
+  savePicks()
+  const on = domains.filter(d => picks[d.id].on)
+  const total = on.reduce((s, d) => s + picks[d.id].budgetSats, 0)
+  const summary = el('summary')
+  summary.replaceChildren(h('b', { textContent: String(on.length) }), ` agent${on.length === 1 ? '' : 's'} · up to `, h('b', { className: 'num', textContent: String(total) }), ' sats')
+  if (walletSats !== undefined && total > walletSats) summary.append(h('span', { className: 'err', textContent: ` · wallet has only ${walletSats}` }))
+  el('run-label').textContent = on.length === 0 ? 'Select agents' : `Run ${on.length} agent${on.length === 1 ? '' : 's'}`
+  syncRunButton()
+}
+
+function setAll (on: boolean, caseIndex?: number, budgetSats?: number): void {
+  for (const d of domains) {
+    const p = picks[d.id]
+    p.on = on
+    if (caseIndex !== undefined) p.caseId = d.cases[caseIndex].id
+    if (budgetSats !== undefined) p.budgetSats = budgetSats
+  }
+  renderRoster()
+}
+el('select-all').addEventListener('click', () => { setAll(true) })
+el('select-none').addEventListener('click', () => { setAll(false) })
+// Presets are one click: select, configure and launch.
+el('preset-rush').addEventListener('click', () => { setAll(true, 0, 800); startRun() })
+el('preset-quiet').addEventListener('click', () => { setAll(true, 1, 300); startRun() })
 
 function runMsg (text: string, isError = false): void {
   const m = el('run-msg')
@@ -175,36 +216,57 @@ function runMsg (text: string, isError = false): void {
   m.className = isError ? 'hint err' : 'hint'
 }
 
-let shownRunId = ''
-let shownLines = 0
 let runActive = false
+let startingRun = false
+function syncRunButton (): void {
+  const busy = startingRun || runActive || !agentsEnabled
+  el<HTMLButtonElement>('run').disabled = busy || !domains.some(d => picks[d.id]?.on)
+  for (const id of ['preset-rush', 'preset-quiet']) el<HTMLButtonElement>(id).disabled = busy
+}
 
-function renderRun (run: AgentRun | undefined): void {
-  if (run === undefined) return
+const shown = new Map<string, number>() // run id → log lines already appended
+let batchKey = ''
+const nameOf = (domainId: string): string => domains.find(d => d.id === domainId)?.name ?? domainId
+
+function renderRuns (runs: AgentRun[]): void {
+  if (runs.length === 0) return
+  const key = runs.map(r => r.id).join(',')
   const log = el('log')
-  if (run.id !== shownRunId) { log.replaceChildren(); shownRunId = run.id; shownLines = 0 }
+  if (key !== batchKey) { batchKey = key; shown.clear(); log.replaceChildren() }
   el('empty-log').hidden = true
-  el('run-title').textContent = run.title
-  const badge = el('run-badge')
-  badge.hidden = false
-  badge.className = `badge ${run.status}`
-  badge.textContent = run.status === 'running' ? `${run.mode === 'llm' ? 'Claude' : 'Rule-based'} · running` : run.status
-  el('meter').style.width = `${Math.min(100, (run.spentSats / run.budgetSats) * 100)}%`
-  el('spent').textContent = `${run.spentSats} sats spent`
-  el('budget-label').textContent = `budget ${run.budgetSats}`
+  const spent = runs.reduce((s, r) => s + r.spentSats, 0)
+  const budget = runs.reduce((s, r) => s + r.budgetSats, 0)
+  el('run-total').textContent = `${spent} / ${budget} sats`
 
+  el('lanes').replaceChildren(...runs.map(r => {
+    const fill = h('div')
+    fill.style.width = `${Math.min(100, (r.spentSats / r.budgetSats) * 100)}%`
+    const meter = h('div', { className: 'meter' }, fill)
+    meter.setAttribute('aria-hidden', 'true')
+    const badge = h('span', { className: `badge ${r.status}`, textContent: r.status === 'running' ? (r.mode === 'llm' ? 'Claude · running' : 'running') : r.status })
+    return h('div', { className: 'lane' },
+      icon(r.domain),
+      h('span', { className: 't', title: r.title }, h('b', { textContent: nameOf(r.domain) }), ` · ${r.title.split(' · ')[1] ?? ''}`),
+      h('span', { className: 'amt num' }, `${r.spentSats}/${r.budgetSats} `, badge),
+      meter)
+  }))
+
+  // Append only the new lines, merged across agents in time order.
+  const fresh = runs.flatMap(r => r.log.slice(shown.get(r.id) ?? 0).map(line => ({ line, r })))
+  for (const r of runs) shown.set(r.id, r.log.length)
+  fresh.sort((a, b) => a.line.at - b.line.at)
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40
-  for (const line of run.log.slice(shownLines)) {
-    const body = h('span', {}, line.text)
+  for (const { line, r } of fresh) {
+    const body = h('span', {}, h('span', { className: 'tagd', textContent: nameOf(r.domain) }), line.text)
     if (line.txid !== undefined) body.append(txLink(line.txid, 'view tx ↗'))
     log.append(h('li', { className: line.kind }, h('span', { className: 'k', textContent: line.kind.toUpperCase() }), body))
   }
-  shownLines = run.log.length
   if (nearBottom) log.scrollTop = log.scrollHeight
 
   const wasActive = runActive
-  runActive = run.status === 'running'
-  if (wasActive && !runActive) void loadWallet()
+  runActive = runs.some(r => r.status === 'running')
+  if (wasActive && !runActive) { runMsg(`All agents finished: ${spent} sats spent.`); void loadWallet() }
+  syncRunButton()
 }
 
 let identityKey = ''
@@ -215,9 +277,10 @@ async function loadWallet (): Promise<void> {
     const w = await res.json()
     if (!res.ok) { el('wallet-sats').textContent = 'unavailable'; return }
     identityKey = w.identityKey
+    walletSats = w.sats
     el('wallet-sats').textContent = `${w.sats} sats`
     el('copy-key').hidden = false
-    if (w.sats < 300) runMsg('The agent wallet is low: fund it with npm run fund -- 2500, or send sats to its identity key.', true)
+    changed()
   } catch {
     el('wallet-sats').textContent = 'unavailable'
   }
@@ -227,51 +290,60 @@ el('copy-key').addEventListener('click', () => {
   setTimeout(() => { el('copy-key').textContent = 'Copy identity key' }, 1500)
 })
 
-let startingRun = false
 async function pollAgents (first = false): Promise<void> {
   try {
     const a = await (await fetch('/agents')).json()
     if (first) {
       domains = a.domains
       agentsEnabled = a.enabled
-      selectDomain(domains[0].id)
-      const llm = el('llm-label').querySelector('input')!
-      llm.disabled = !a.llm
-      if (!a.llm) el('llm-label').title = 'Needs ANTHROPIC_API_KEY on the server'
+      llmAvailable = a.llm
+      const saved = loadPicks()
+      picks = Object.fromEntries(domains.map((d, i): [string, Pick] => {
+        const s = saved[d.id]
+        if (s === undefined || !d.cases.some(c => c.id === s.caseId)) return [d.id, { on: i < 3, caseId: d.cases[0].id, mode: 'scripted', budgetSats: 500 }]
+        return [d.id, { ...s, mode: s.mode === 'llm' && !llmAvailable ? 'scripted' : s.mode }]
+      }))
+      renderRoster()
       el('token-field').hidden = !a.tokenRequired
       if (!a.enabled) runMsg('Agent console is off: the server needs AGENT_LLM_KEY in .env.', true)
       void loadWallet()
     }
-    renderRun(a.run)
-    el<HTMLButtonElement>('run').disabled = startingRun || runActive || !agentsEnabled
+    renderRuns(a.runs ?? [])
   } catch {
     if (first) setTimeout(() => { void pollAgents(true) }, 3000)
   }
 }
 
-el('run').addEventListener('click', () => {
-  const mode = (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value
+function startRun (): void {
+  const agents = domains.filter(d => picks[d.id].on).map(d => {
+    const { caseId, mode, budgetSats } = picks[d.id]
+    return { domain: d.id, caseId, mode, budgetSats }
+  })
+  if (agents.length === 0 || runActive || startingRun) return
   startingRun = true
-  el<HTMLButtonElement>('run').disabled = true
-  runMsg('Starting agent…')
+  syncRunButton()
+  runMsg(`Starting ${agents.length} agent${agents.length === 1 ? '' : 's'}…`)
   void (async () => {
     try {
       const res = await fetch('/agents/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-run-token': el<HTMLInputElement>('token').value },
-        body: JSON.stringify({ domain: domainId, caseId, mode, budgetSats: Number(budgetInput.value) })
+        body: JSON.stringify({ agents })
       })
       const body = await res.json()
-      if (!res.ok) { runMsg(body.error ?? body.description ?? `Request failed (HTTP ${res.status})`, true); return }
-      runMsg('Agent running: watch it bid in the log and the queue.')
-      renderRun(body)
+      if (!res.ok) { runMsg(body.error ?? `Request failed (HTTP ${res.status})`, true); return }
+      runMsg('Agents running: they compete for the queue below.')
+      runActive = true
+      renderRuns(body.runs)
     } catch (e) {
       runMsg(String(e), true)
     } finally {
       startingRun = false
+      syncRunButton()
     }
   })()
-})
+}
+el('run').addEventListener('click', startRun)
 
 // ---------- Pay yourself ----------
 
