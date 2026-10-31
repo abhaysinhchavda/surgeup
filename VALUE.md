@@ -2,11 +2,11 @@
 
 ## The problem
 
-AI agents are starting to buy API calls on their own, but APIs still sell them the way they sell to people: monthly plans, API keys, flat per-call prices. A flat price treats an agent racing a deadline the same as one doing background work, so when capacity is short the urgent call waits behind the routine one. Rate limits are blunt, and the agent has no way to say "this one matters, I'll pay more."
+In the near future, AI agents are starting to buy API calls on their own instead of humans, but in the case of overloading of API requests how can we determine which request will be prioritized and executed first? Due to the current way APIs are still selling to people - only monthly plans, API keys, flat per-call prices - an agent racing a deadline is currently treated inefficiently with the same priority as another agent doing only background work. Therefore, when capacity is short, the more urgent call has to wait in an efficient manner behind the routine one. This is very detrimental to not only the speed & the smoothness of running API calls, but also stalls or even slows down the transaction traffic/volume. Plus, the agent has no way to say "this one matters, I'll pay more."
 
 ## What SurgeUp does
 
-SurgeUp turns API capacity into a live market, settled in sats on BSV:
+SurgeUp turns API capacity into a live market, settled in sats on BSV. In this way, in the case of overloading of API calls, instead of simply rejecting requests with "429 too many requests" error message, SurgeUp auctions the next free slots for sats:
 
 - **Surge pricing.** Each call pays a price that rises with queue depth. Callers can bid above it, and the highest bid is served next.
 - **SURGEPASS swap (the DeFi core).** A BSV-21 token sold on a bonding curve: 300 sats plus 50 for every pass in circulation. A pass buys one queue-jumping call. Redeemed passes flow back to the provider, so the price tracks demand both ways.
@@ -17,8 +17,8 @@ No accounts and no API keys: the API answers HTTP 402, the caller's wallet pays,
 ## Who uses it
 
 - **AI agent builders** who need a way to pay per call, with priority when it matters, without handing out API keys or prepaying a plan.
-- **API and model providers** with scarce capacity (GPU inference, data feeds) who want price to allocate it instead of rate limits, and to be paid instantly per call.
-- **People** who want a one-off call without signing up: they pay from BSV Desktop and get the result.
+- **API and model providers** with scarce capacity (GPU inference, data feeds) who want bidding price to allocate it instead of rate limits, and to be paid instantly per call.
+- **People** who want a one-off call without signing up: they pay from BSV Desktop (Wallet) and get the result.
 
 ## How people use it
 
@@ -28,10 +28,11 @@ No accounts and no API keys: the API answers HTTP 402, the caller's wallet pays,
 
 Funds never pass through SurgeUp: each payment goes straight from the payer's wallet to the provider's.
 
-## Value to BSV Blockchain
+## Values that SurgeUp creates for BSV Blockchain
 
-- **Transaction volume that fits BSV.** Every call, swap and redemption is an on-chain transaction worth a few hundred sats. That pattern only works with BSV's fees; on high-fee chains the fee would exceed the payment.
 - **New users through agents.** Any agent framework can plug in with a wallet and an HTTP client. Each new agent is a new BSV wallet that transacts on its own, around the clock.
+- **Rising liquidity.** Faster speed of processing API requests lead to higher traffic, which in turn leads to higher transaction volume and thus increasing liquidity.
+- **Transaction volume that fits BSV.** Every call, swap and redemption is an on-chain transaction worth a few hundred sats. That pattern only works with BSV's fees; on high-fee chains the fee would exceed the payment.
 - **A real use for BSV-21 tokens.** SURGEPASS has utility (priority) and a price discovered on-chain, a template providers can reuse to sell capacity, credits or access.
 - **Standard BSV stack, end to end.** Built on the BSV TypeScript SDK, Wallet Toolbox, BRC-100 wallets (BSV Desktop), BRC-103/104 auth and BRC-105 payments, so others can copy it.
 
