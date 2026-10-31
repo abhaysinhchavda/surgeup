@@ -119,3 +119,26 @@ describe('agents swap into SURGEPASS when it beats the surge', () => {
     expect(r.spentSats).toBeLessThanOrEqual(200)
   })
 })
+
+describe('idle queue: urgent bid equals the pass price', () => {
+  const PORT = 18112
+  let server: ReturnType<typeof createServer>
+  beforeAll(async () => {
+    const app = createSurgeApp(provider, new Market({ baseSats: 100, k: 0.5 }), passes)
+    server = await new Promise(resolve => { const s = createServer(app).listen(PORT, () => resolve(s)) })
+  })
+  afterAll(async () => {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  })
+
+  it('surge 100, bid 300 = pass 300: swaps, since the pass also jumps the queue', async () => {
+    const kinds: LogKind[] = []
+    const budget = { limitSats: 1000, spentSats: 0 }
+    const agentCase: AgentCase = { id: 't', title: 't', brief: '', tasks: [{ prompt: 'tie', deadlineSec: 30, valueSats: 2000 }] }
+    await runScripted({ wallet: alice, baseUrl: `http://localhost:${PORT}`, agentCase, budget, label: 'Agent T', log: k => { kinds.push(k) }, swap: { kit: kitA, tokenId } })
+    expect(kinds).toContain('swap')
+    expect(kinds).not.toContain('error')
+    expect(budget.spentSats).toBe(300)
+  })
+})

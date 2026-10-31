@@ -5,3 +5,13 @@ data/*.db*
 dist
 .DS_Store
 data/overlay.key
+
+# Notes, video project and starter kit stay local
+AGENTS.md
+BSV_STACK_COMPLETE_GUIDE.md
+START-HERE.md
+TASKS.md
+TBC26_BSV_Track_Requirements.pdf
+docs/
+video/
+starter/

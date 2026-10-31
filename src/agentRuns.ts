@@ -80,8 +80,9 @@ export async function runScripted (o: { wallet: WalletInterface, baseUrl: string
       const { priceSats, passSats } = await (await fetch(`${o.baseUrl}/price`)).json()
       let bid = bidAt(priceSats)
       if (bid < priceSats) { o.log('skip', `"${t.prompt}": surge ${priceSats} sats is above its worth (${t.valueSats}); skipped`); continue }
-      if (o.swap !== undefined && typeof passSats === 'number' && passSats < bid && guardBid(o.budget, passSats).ok) {
-        o.log('swap', `"${t.prompt}": surge bid ${bid} > pass ${passSats} → swapping sats into SURGEPASS`)
+      // At equal cost the pass still wins: it goes to the front of the queue.
+      if (o.swap !== undefined && typeof passSats === 'number' && passSats <= bid && guardBid(o.budget, passSats).ok) {
+        o.log('swap', `"${t.prompt}": surge bid ${bid} ≥ pass ${passSats} → swapping sats into SURGEPASS`)
         await swapAndRedeem({ ...o, swap: o.swap }, t.prompt, bid)
         continue
       }

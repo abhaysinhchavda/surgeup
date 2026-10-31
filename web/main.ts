@@ -727,6 +727,7 @@ async function pollSwap (): Promise<void> {
     const res = await fetch('/swap')
     const s: SwapInfo = res.ok ? await res.json() : { enabled: false }
     const live = s.enabled && s.curve !== undefined && s.priceSats !== undefined
+    if (s.enabled && !live && (swapCurve?.length ?? 0) > 0) return // a quote timed out: keep the last good view
     el('swap-on').hidden = !live
     el('swap-off').hidden = live
     el('pass-price').textContent = live ? `Pass price ${s.priceSats} sats${s.soldOut === true ? ' (sold out)' : ''}.` : ''

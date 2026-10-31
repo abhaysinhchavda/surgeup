@@ -2,6 +2,8 @@
 
 # SurgeUp
 
+### Priority, priced in sats.
+
 **A priority market for AI API calls, paid on BSV, with a token swap that agents use to jump the queue.**
 
 Every call pays a surge price in sats that rises with queue depth. Callers can bid above it, and the highest bid is served next. SURGEPASS, a BSV-21 token sold on a bonding curve, is the DeFi core: when the surge is high, an agent swaps sats into a pass, sends it back and goes straight to the front. Agents pay from their own wallets; people pay from BSV Desktop.
@@ -11,7 +13,6 @@ Built for the TUM Blockchain & AI Hackathon 2026, BSV Blockchain track (DeFi Rai
 | | |
 |---|---|
 | **Live demo** | https://surgeup.vercel.app/ |
-| **Demo video (2:25)** | _link to be added_ · script: [docs/video-script.md](docs/video-script.md) |
 | **Usage and value note** | [VALUE.md](VALUE.md) |
 | **Network** | BSV mainnet |
 
@@ -149,4 +150,7 @@ npm run typecheck
 | `src/kit/` | BSV-21 token kit and overlay (from the BSV starter kit) |
 | `web/` | Dashboard (Vite, vanilla TypeScript) |
 | `test/` | End-to-end tests on the mock chain |
-| `video/` | Remotion project for the demo video |
+
+## License
+
+[MIT](LICENSE)

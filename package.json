@@ -2,6 +2,7 @@
   "name": "surgeapi",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Pay-per-call AI API on BSV with a live priority market",
   "engines": {
