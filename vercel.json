@@ -4,8 +4,44 @@
   "outputDirectory": "web/dist",
   "rewrites": [
     {
-      "source": "/:route(price|state|provider|agents|pass|job|\\.well-known)/:rest*",
-      "destination": "https://pee-coaching-possibly-image.trycloudflare.com/:route/:rest*"
+      "source": "/price",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/price"
+    },
+    {
+      "source": "/state",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/state"
+    },
+    {
+      "source": "/provider",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/provider"
+    },
+    {
+      "source": "/agents",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents"
+    },
+    {
+      "source": "/agents/run",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/run"
+    },
+    {
+      "source": "/agents/wallet",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/wallet"
+    },
+    {
+      "source": "/pass",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/pass"
+    },
+    {
+      "source": "/job",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/job"
+    },
+    {
+      "source": "/job/:id",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/job/:id"
+    },
+    {
+      "source": "/.well-known/:path*",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/.well-known/:path*"
     }
   ]
 }
