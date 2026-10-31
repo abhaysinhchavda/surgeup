@@ -31,6 +31,7 @@ const ICONS: Record<string, string> = {
   logistics: '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
   research: '<path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><path d="M5.52 16h12.96"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  you: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   ecommerce: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>'
 }
 const icon = (name: string): SVGSVGElement => {
@@ -145,6 +146,7 @@ function renderMarket (s: MarketSnapshot): void {
   const queue = s.queue.map((j, i) => queueRow(j, String(i + 1)))
   if (s.running !== undefined) queue.unshift(queueRow(s.running, '▶', 'running'))
   el('queue').replaceChildren(...(queue.length > 0 ? queue : [emptyRow('Queue empty', 3)]))
+  renderQueueViz(s, topBid)
   el('queue-count').textContent = s.running === undefined ? '' : `1 running · ${s.queue.length} waiting`
 
   const rows = (jobs: Job[], table: string): HTMLTableRowElement[] => jobs.length > 0
@@ -156,6 +158,51 @@ function renderMarket (s: MarketSnapshot): void {
   renderProfile(s)
   primed = true
 }
+// Queue visual: one tile per job, kept across polls so a job glides as it moves up
+// the line and into the serving slot (FLIP: measure, reorder, animate the offset).
+const QVIZ_MAX = 24
+const tiles = new Map<string, HTMLElement>()
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)')
+function tileFor (j: Job, topBid: number): HTMLElement {
+  let t = tiles.get(j.id)
+  if (t === undefined) {
+    const kind = j.viaPass ? 'pass' : j.label === 'You' ? 'you' : 'agent'
+    const name = kind === 'you' ? 'you' : j.label.toLowerCase().replace(/ agent$/, '').replace(/[^a-z]/g, '')
+    t = h('div', { className: `qt ${kind} enter` }, ICONS[name] === undefined ? h('i', { textContent: j.label.charAt(0).toUpperCase() }) : icon(name), h('b', { className: 'num', textContent: j.viaPass ? 'pass' : String(j.paidSats) }))
+    t.addEventListener('animationend', () => { t!.classList.remove('enter') }, { once: true })
+    tiles.set(j.id, t)
+  }
+  t.style.setProperty('--h', `${22 + 50 * (j.paidSats / topBid)}px`)
+  t.title = `${j.label} · ${j.viaPass ? 'pass' : `${j.paidSats} sats`}`
+  return t
+}
+// Moves only the nodes that are out of place: re-inserting a node restarts its CSS animations.
+function syncChildren (parent: HTMLElement, nodes: Node[]): void {
+  nodes.forEach((n, i) => { if (parent.childNodes[i] !== n) parent.insertBefore(n, parent.childNodes[i] ?? null) })
+  while (parent.childNodes.length > nodes.length) parent.lastChild!.remove()
+}
+const qidle = el('qidle')
+const qmore = h('span', { className: 'qmore' })
+function renderQueueViz (s: MarketSnapshot, topBid: number): void {
+  const before = new Map([...tiles].map(([id, t]) => [id, t.getBoundingClientRect()]))
+  const waiting = s.queue.slice(0, QVIZ_MAX)
+  syncChildren(el('qslot'), s.running === undefined ? [] : [tileFor(s.running, topBid)])
+  const track: Node[] = waiting.map(j => tileFor(j, topBid))
+  qmore.textContent = `+${s.queue.length - QVIZ_MAX}`
+  if (s.queue.length > QVIZ_MAX) track.push(qmore)
+  syncChildren(el('qtrack'), track.length > 0 ? track : [qidle])
+  const live = new Set([s.running?.id, ...waiting.map(j => j.id)])
+  for (const id of tiles.keys()) if (!live.has(id)) tiles.delete(id)
+  if (reduceMotion.matches) return
+  for (const [id, t] of tiles) {
+    const b = before.get(id)
+    if (b === undefined || b.width === 0) continue
+    const a = t.getBoundingClientRect()
+    const dx = b.left - a.left; const dy = b.bottom - a.bottom
+    if (Math.abs(dx) + Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 500, easing: 'cubic-bezier(.2, .8, .2, 1)' })
+  }
+}
+
 const waitOf = (j: Job): string => j.startedAt === undefined ? '–' : `${((j.startedAt - j.enqueuedAt) / 1000).toFixed(1)} s`
 
 // ---------- Pages ----------

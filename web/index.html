@@ -185,6 +185,24 @@
     .hint.ok { color: var(--accent); display: flex; align-items: center; gap: 6px; }
     .hint.ok svg { animation: pop .5s var(--ease); }
     @keyframes pop { 0% { transform: scale(0); } 70% { transform: scale(1.3); } }
+    /* Queue visual: the job being served, then the waiting line in priority order */
+    .qviz { display: flex; align-items: stretch; gap: 12px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.02); }
+    .qserver { flex: none; display: grid; justify-items: center; align-content: end; gap: 6px; padding-right: 12px; border-right: 1px dashed var(--line-2); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+    .qslot { width: 52px; height: 72px; display: flex; align-items: flex-end; justify-content: center; padding: 4px; border-radius: 10px; border: 1px dashed var(--line-2); }
+    .qlane { flex: 1; min-width: 0; display: grid; gap: 4px; }
+    .qtrack { height: 76px; display: flex; align-items: flex-end; gap: 4px; overflow: hidden; }
+    .qidle { align-self: center; margin: 0 auto; font-size: 12px; color: var(--dim); }
+    .qcap { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+    .qt { flex: 1 1 0; min-width: 16px; max-width: 40px; height: var(--h); display: flex; flex-direction: column; align-items: center; gap: 2px; padding-top: 5px; overflow: hidden; border-radius: 6px 6px 3px 3px; background: rgba(157,140,255,.3); color: #d6cfff; transition: height .4s var(--ease); }
+    .qt.you { background: rgba(var(--brand-rgb), .55); color: #fff; } .qt.pass { background: rgba(234,179,0,.28); color: #ffd54a; }
+    .qt svg.i { width: 14px; height: 14px; }
+    .qt i { font-style: normal; font-size: 11px; font-weight: 700; }
+    .qt b { font-size: 9px; line-height: 1; }
+    .qslot .qt { flex: none; width: 42px; max-width: none; height: 62px; box-shadow: 0 0 0 2px var(--accent); animation: serving 1.1s ease-in-out infinite alternate; }
+    @keyframes serving { to { box-shadow: 0 0 0 5px rgba(var(--brand-rgb), .3); } }
+    .qt.enter { animation: qin .45s var(--ease); }
+    @keyframes qin { from { opacity: 0; transform: translateY(14px); } }
+    .qmore { flex: none; align-self: center; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line-2); font-size: 11px; color: var(--muted); }
     .logbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .logbar[hidden] { display: none; }
     .logbar select, .logbar input { min-height: 36px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
@@ -286,6 +304,13 @@
         <div class="row-market">
           <section class="card" aria-label="Queue">
             <h2>Queue <span class="count" id="queue-count"></span></h2>
+            <div class="qviz" aria-hidden="true">
+              <div class="qserver">Serving<div class="qslot" id="qslot"></div></div>
+              <div class="qlane">
+                <div class="qtrack" id="qtrack"><span class="qidle" id="qidle">No one waiting</span></div>
+                <div class="qcap"><span>← next up</span><span>bar height = bid</span></div>
+              </div>
+            </div>
             <div class="scroll"><table>
               <thead><tr><th>#</th><th>Caller</th><th class="num">Paid</th></tr></thead>
               <tbody id="queue"></tbody>
