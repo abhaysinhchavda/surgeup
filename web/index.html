@@ -60,7 +60,7 @@
     @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(var(--brand-rgb),0); } 100% { box-shadow: 0 0 0 0 rgba(var(--brand-rgb),0); } }
 
     /* Cards */
-    .card { background: linear-gradient(180deg, var(--card-2), var(--card)); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
+    .card { background: linear-gradient(180deg, rgba(27, 27, 33, .72), rgba(20, 20, 24, .72)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
     h2 { margin: 0 0 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
     h2 .count { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--dim); font-weight: 500; }
 
@@ -75,7 +75,15 @@
     .surge[data-level="warm"] .value { color: var(--warn); } .surge[data-level="hot"] .value { color: var(--hot); }
     .mult { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(var(--brand-rgb),.12); color: var(--accent); }
     .surge[data-level="warm"] .mult { background: rgba(245,165,36,.14); color: var(--warn); } .surge[data-level="hot"] .mult { background: rgba(255,53,32,.14); color: var(--hot); }
-    .spark { width: 100%; height: 64px; display: block; }
+    .chart { position: relative; min-width: 0; cursor: crosshair; touch-action: pan-y; }
+    .spark { width: 100%; height: 80px; display: block; }
+    .spark .ref { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+    .axis { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--dim); }
+    .hair { position: absolute; top: 0; height: 80px; width: 1px; background: var(--dim); pointer-events: none; }
+    .hair[hidden], .tip[hidden] { display: none; }
+    .hair .dotp { position: absolute; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); transform: translateY(-50%); }
+    .surge[data-level="warm"] .hair .dotp { background: var(--warn); } .surge[data-level="hot"] .hair .dotp { background: var(--hot); }
+    .tip { position: absolute; top: -4px; transform: translate(-50%, -100%); padding: 4px 8px; border-radius: 6px; background: var(--card-2); border: 1px solid var(--line-2); font-size: 12px; color: var(--ink); white-space: nowrap; pointer-events: none; }
     .spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; transition: stroke .3s; }
     .spark polygon { fill: rgba(var(--brand-rgb),.10); }
     .surge[data-level="warm"] .spark polyline { stroke: var(--warn); } .surge[data-level="hot"] .spark polyline { stroke: var(--hot); }
@@ -168,6 +176,21 @@
     th { font-size: 11px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
     td.num, th.num { text-align: right; white-space: nowrap; }
     td.empty { color: var(--dim); text-align: center; padding: 20px; }
+    tbody td { transition: background .15s; }
+    tbody tr:hover td:not(.empty) { background: rgba(255,255,255,.04); }
+    tr.new td { animation: slidein .5s var(--ease); }
+    @keyframes slidein { from { opacity: 0; transform: translateX(16px); background: rgba(var(--brand-rgb), .2); } }
+    td.bidcell { position: relative; isolation: isolate; }
+    td.bidcell::before { content: ""; position: absolute; z-index: -1; left: 0; top: 7px; bottom: 7px; width: var(--w); border-radius: 0 4px 4px 0; background: rgba(var(--brand-rgb), .32); transition: width .4s var(--ease); }
+    .hint.ok { color: var(--accent); display: flex; align-items: center; gap: 6px; }
+    .hint.ok svg { animation: pop .5s var(--ease); }
+    @keyframes pop { 0% { transform: scale(0); } 70% { transform: scale(1.3); } }
+    .logbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .logbar[hidden] { display: none; }
+    .logbar select, .logbar input { min-height: 36px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+    .logbar input { flex: 1; min-width: 120px; }
+    .log li[hidden] { display: none; }
+    .log li b.num { color: var(--ink); font-size: 12px; }
     tr.running td { color: var(--info); }
     .who { display: inline-flex; align-items: center; gap: 6px; }
     .pill { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; }
@@ -233,7 +256,12 @@
               <div class="value num"><span id="price">–</span><small>sats / call</small></div>
               <span class="mult" id="mult">×1.0 base</span>
             </div>
-            <svg class="spark" id="spark" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Surge price over the last minute"><polygon points=""/><polyline points=""/></svg>
+            <div class="chart" id="chart">
+              <svg class="spark" id="spark" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Surge price over the last 10 minutes"><line class="ref" x1="0" x2="100" y1="40" y2="40"/><polygon points=""/><polyline points=""/></svg>
+              <div class="hair" id="hair" hidden><span class="dotp"></span></div>
+              <div class="tip num" id="tip" hidden></div>
+              <div class="axis"><span>10 min ago</span><span id="chart-peak"></span><span>now · dashed = base 100</span></div>
+            </div>
           </div>
           <div class="card kpi"><div class="label">Queue depth</div><div class="value num" id="depth">–</div><div class="sub">jobs waiting</div></div>
           <div class="card kpi"><div class="label">Jobs served</div><div class="value num" id="served-count">–</div><div class="sub">recent</div></div>
@@ -296,6 +324,12 @@
           <div aria-label="Live run">
             <h2>Live run <span class="count" id="run-total"></span></h2>
             <div class="lanes" id="lanes"></div>
+            <div class="logbar" id="logbar" hidden>
+              <select id="log-agent" aria-label="Filter by agent"><option value="">All agents</option></select>
+              <select id="log-kind" aria-label="Filter by event"><option value="">All events</option><option value="think">Think</option><option value="pay">Pay</option><option value="skip">Skip</option><option value="error">Error</option><option value="info">Info</option></select>
+              <input id="log-search" type="search" placeholder="Search the log" aria-label="Search the log">
+              <button class="ghost" id="log-export" type="button">Export JSON</button>
+            </div>
             <ol class="log" id="log" aria-live="polite"></ol>
             <div class="empty-log" id="empty-log">Tick the agents you want, set each budget, then press <b>Run</b>, or use a preset. Every decision and payment streams in here.</div>
             <div class="wallet"><span>Agent wallet</span><b class="num" id="wallet-sats">–</b><button class="ghost" id="copy-key" type="button" hidden>Copy identity key</button></div>

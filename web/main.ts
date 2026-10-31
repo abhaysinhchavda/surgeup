@@ -13,7 +13,7 @@ import { createBrc29Payment, type Brc29Payment } from '../src/payments'
 const POLL_MS = 1000
 const RESULT_TIMEOUT_MS = 5 * 60_000
 const BASE_SATS = 100
-const SPARK_POINTS = 60
+const CHART_MS = 10 * 60_000
 
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T
 const sleep = async (ms: number): Promise<void> => await new Promise(resolve => setTimeout(resolve, ms))
@@ -30,6 +30,7 @@ const ICONS: Record<string, string> = {
   legal: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
   logistics: '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
   research: '<path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><path d="M5.52 16h12.96"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
   ecommerce: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>'
 }
 const icon = (name: string): SVGSVGElement => {
@@ -61,19 +62,56 @@ function tr (cells: Array<string | Node>, numCols: number[] = [], className = ''
 }
 const emptyRow = (text: string, cols: number): HTMLTableRowElement => h('tr', {}, h('td', { className: 'empty', colSpan: cols, textContent: text }))
 
-const history: number[] = []
+// Rows the tables have shown before: only rows new since the first render slide in.
+const seenRows = new Set<string>()
+let primed = false
+function mark (row: HTMLTableRowElement, key: string): HTMLTableRowElement {
+  if (primed && !seenRows.has(key)) row.classList.add('new')
+  seenRows.add(key)
+  return row
+}
+
+// Surge price over the last 10 minutes, one point per poll.
+const history: Array<{ t: number, p: number }> = []
+let chartMax = BASE_SATS * 2
 let lastPrice: number | undefined
 let bidEdited = false
 el<HTMLInputElement>('bid').addEventListener('input', () => { bidEdited = true })
 
+const xOf = (t: number, now: number): number => 100 - ((now - t) / CHART_MS) * 100
+const yOf = (p: number): number => 40 - (p / chartMax) * 36
 function renderSpark (): void {
+  const now = Date.now()
+  while (history.length > 1 && now - history[0].t > CHART_MS) history.shift()
+  const prices = history.map(x => x.p)
+  chartMax = Math.max(BASE_SATS * 2, ...prices)
   const svg = el('spark')
-  const max = Math.max(BASE_SATS * 2, ...history)
-  const pts = history.map((p, i) => `${(i / (SPARK_POINTS - 1)) * 100},${40 - (p / max) * 36}`)
+  const pts = history.map(({ t, p }) => `${xOf(t, now)},${yOf(p)}`)
   svg.querySelector('polyline')!.setAttribute('points', pts.join(' '))
-  const x1 = ((history.length - 1) / (SPARK_POINTS - 1)) * 100
-  svg.querySelector('polygon')!.setAttribute('points', pts.length > 1 ? `0,40 ${pts.join(' ')} ${x1},40` : '')
+  svg.querySelector('polygon')!.setAttribute('points', pts.length > 1 ? `${xOf(history[0].t, now)},40 ${pts.join(' ')} 100,40` : '')
+  const ref = svg.querySelector('line')!
+  ref.setAttribute('y1', String(yOf(BASE_SATS))); ref.setAttribute('y2', String(yOf(BASE_SATS)))
+  el('chart-peak').textContent = `peak ${Math.max(...prices)} sats`
 }
+
+const chart = el('chart')
+chart.addEventListener('pointermove', e => {
+  if (history.length === 0) return
+  const box = chart.getBoundingClientRect()
+  const now = Date.now()
+  const target = now - (1 - (e.clientX - box.left) / box.width) * CHART_MS
+  const pt = history.reduce((a, b) => Math.abs(b.t - target) < Math.abs(a.t - target) ? b : a)
+  const x = xOf(pt.t, now)
+  const hair = el('hair')
+  hair.hidden = false
+  hair.style.left = `${x}%`
+  hair.querySelector<HTMLElement>('.dotp')!.style.top = `${(yOf(pt.p) / 40) * 100}%`
+  const tip = el('tip')
+  tip.hidden = false
+  tip.style.left = `${Math.min(85, Math.max(15, x))}%`
+  tip.textContent = `${pt.p} sats · ${new Date(pt.t).toLocaleTimeString()}`
+})
+chart.addEventListener('pointerleave', () => { el('hair').hidden = true; el('tip').hidden = true })
 
 function renderMarket (s: MarketSnapshot): void {
   const price = s.priceSats
@@ -87,7 +125,7 @@ function renderMarket (s: MarketSnapshot): void {
   const mult = price / BASE_SATS
   el('surge').dataset.level = mult >= 2.5 ? 'hot' : mult >= 1.5 ? 'warm' : 'base'
   el('mult').textContent = mult === 1 ? '×1.0 base' : `×${mult.toFixed(1)} surge`
-  history.push(price); if (history.length > SPARK_POINTS) history.shift()
+  history.push({ t: Date.now(), p: price })
   renderSpark()
 
   el('depth').textContent = String(s.queueDepth)
@@ -95,17 +133,28 @@ function renderMarket (s: MarketSnapshot): void {
   el('earned').textContent = String(s.served.reduce((sum, j) => sum + j.paidSats, 0) + (s.running?.paidSats ?? 0))
   if (!bidEdited) el<HTMLInputElement>('bid').value = String(price)
 
-  const queue = s.queue.map((j, i) => tr([String(i + 1), who(j.label, j.viaPass), paid(j)], [2]))
-  if (s.running !== undefined) queue.unshift(tr(['▶', who(s.running.label, s.running.viaPass), paid(s.running)], [2], 'running'))
+  // Each Paid cell carries a bar sized against the top bid: the queue's bid distribution at a glance.
+  const inQueue = [...(s.running === undefined ? [] : [s.running]), ...s.queue]
+  const topBid = Math.max(1, ...inQueue.map(j => j.paidSats))
+  const queueRow = (j: Job, pos: string, cls = ''): HTMLTableRowElement => {
+    const r = mark(tr([pos, who(j.label, j.viaPass), paid(j)], [2], cls), `q:${j.id}:${cls}`)
+    r.cells[2].classList.add('bidcell')
+    r.cells[2].style.setProperty('--w', `${(j.paidSats / topBid) * 100}%`)
+    return r
+  }
+  const queue = s.queue.map((j, i) => queueRow(j, String(i + 1)))
+  if (s.running !== undefined) queue.unshift(queueRow(s.running, '▶', 'running'))
   el('queue').replaceChildren(...(queue.length > 0 ? queue : [emptyRow('Queue empty', 3)]))
   el('queue-count').textContent = s.running === undefined ? '' : `1 running · ${s.queue.length} waiting`
 
-  const servedRow = (j: Job): HTMLTableRowElement => tr([who(j.label, j.viaPass), paid(j), waitOf(j), txLink(j.txid)], [1, 2])
-  const rows = (jobs: Job[]): HTMLTableRowElement[] => jobs.length > 0 ? jobs.map(servedRow) : [emptyRow('No jobs yet', 4)]
-  el('recent').replaceChildren(...rows(s.served.slice(0, 5)))
-  el('trace').replaceChildren(...rows(s.served))
+  const rows = (jobs: Job[], table: string): HTMLTableRowElement[] => jobs.length > 0
+    ? jobs.map(j => mark(tr([who(j.label, j.viaPass), paid(j), waitOf(j), txLink(j.txid)], [1, 2]), `${table}:${j.id}`))
+    : [emptyRow('No jobs yet', 4)]
+  el('recent').replaceChildren(...rows(s.served.slice(0, 5), 'recent'))
+  el('trace').replaceChildren(...rows(s.served, 'trace'))
   el('trace-count').textContent = `${s.served.length} job${s.served.length === 1 ? '' : 's'}`
   renderProfile(s)
+  primed = true
 }
 const waitOf = (j: Job): string => j.startedAt === undefined ? '–' : `${((j.startedAt - j.enqueuedAt) / 1000).toFixed(1)} s`
 
@@ -323,11 +372,37 @@ const shown = new Map<string, number>() // run id → log lines already appended
 let batchKey = ''
 const nameOf = (domainId: string): string => domains.find(d => d.id === domainId)?.name ?? domainId
 
+// Log filters, highlighting and export.
+let lastRuns: AgentRun[] = []
+const highlight = (text: string): Array<string | Node> =>
+  text.split(/(\d+ sats?)/).map((part, i) => i % 2 === 1 ? h('b', { className: 'num', textContent: part }) : part)
+function matches (li: HTMLElement): boolean {
+  const agent = el<HTMLSelectElement>('log-agent').value
+  const kind = el<HTMLSelectElement>('log-kind').value
+  const q = el<HTMLInputElement>('log-search').value.trim().toLowerCase()
+  return (agent === '' || li.dataset.domain === agent) && (kind === '' || li.dataset.kind === kind) && (q === '' || (li.textContent ?? '').toLowerCase().includes(q))
+}
+const filterLog = (): void => { el('log').querySelectorAll('li').forEach(li => { li.hidden = !matches(li) }) }
+for (const id of ['log-agent', 'log-kind', 'log-search']) el(id).addEventListener('input', filterLog)
+el('log-export').addEventListener('click', () => {
+  const lines = lastRuns
+    .flatMap(r => r.log.map(l => ({ at: new Date(l.at).toISOString(), agent: nameOf(r.domain), mode: r.mode, kind: l.kind, text: l.text, txid: l.txid })))
+    .sort((a, b) => a.at.localeCompare(b.at))
+  const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(lines, null, 2)], { type: 'application/json' })), download: `surgeapi-agent-log-${Date.now()}.json` })
+  a.click()
+  setTimeout(() => { URL.revokeObjectURL(a.href) }, 1000)
+})
+
 function renderRuns (runs: AgentRun[]): void {
   if (runs.length === 0) return
   const key = runs.map(r => r.id).join(',')
   const log = el('log')
-  if (key !== batchKey) { batchKey = key; shown.clear(); log.replaceChildren() }
+  if (key !== batchKey) {
+    batchKey = key; shown.clear(); log.replaceChildren()
+    el('log-agent').replaceChildren(h('option', { value: '', textContent: 'All agents' }), ...runs.map(r => h('option', { value: r.domain, textContent: nameOf(r.domain) })))
+    el('logbar').hidden = false
+  }
+  lastRuns = runs
   el('empty-log').hidden = true
   const spent = runs.reduce((s, r) => s + r.spentSats, 0)
   const budget = runs.reduce((s, r) => s + r.budgetSats, 0)
@@ -352,9 +427,13 @@ function renderRuns (runs: AgentRun[]): void {
   fresh.sort((a, b) => a.line.at - b.line.at)
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40
   for (const { line, r } of fresh) {
-    const body = h('span', {}, h('span', { className: 'tagd', textContent: nameOf(r.domain) }), line.text)
+    const body = h('span', {}, h('span', { className: 'tagd', textContent: nameOf(r.domain) }), ...highlight(line.text))
     if (line.txid !== undefined) body.append(txLink(line.txid, 'view tx ↗'))
-    log.append(h('li', { className: line.kind }, h('span', { className: 'k', textContent: line.kind.toUpperCase() }), body))
+    const li = h('li', { className: line.kind }, h('span', { className: 'k', textContent: line.kind.toUpperCase() }), body)
+    li.dataset.domain = r.domain
+    li.dataset.kind = line.kind
+    li.hidden = !matches(li)
+    log.append(li)
   }
   if (nearBottom) log.scrollTop = log.scrollHeight
 
@@ -455,7 +534,9 @@ async function showResult (jobId: string): Promise<void> {
   while (Date.now() < deadline) {
     const job = await (await fetch(`/job/${encodeURIComponent(jobId)}`)).json()
     if (job.status === 'done') {
-      say(`Served after ${((job.waitedMs ?? 0) / 1000).toFixed(1)} s in the queue.`)
+      const msg = el('msg')
+      msg.className = 'hint ok'
+      msg.replaceChildren(icon('check'), `Served after ${((job.waitedMs ?? 0) / 1000).toFixed(1)} s in the queue.`)
       el('result').textContent = job.result ?? ''
       return
     }
