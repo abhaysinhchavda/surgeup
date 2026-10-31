@@ -5,51 +5,51 @@
   "rewrites": [
     {
       "source": "/price",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/price"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/price"
     },
     {
       "source": "/state",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/state"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/state"
     },
     {
       "source": "/network",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/network"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/network"
     },
     {
       "source": "/provider",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/provider"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/provider"
     },
     {
       "source": "/agents",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/agents"
     },
     {
       "source": "/agents/run",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/run"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/agents/run"
     },
     {
       "source": "/agents/wallet",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/wallet"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/agents/wallet"
     },
     {
       "source": "/agents/fund",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/fund"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/agents/fund"
     },
     {
       "source": "/pass",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/pass"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/pass"
     },
     {
       "source": "/job",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/job"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/job"
     },
     {
       "source": "/job/:id",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/job/:id"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/job/:id"
     },
     {
       "source": "/.well-known/:path*",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/.well-known/:path*"
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/.well-known/:path*"
     }
   ]
 }
