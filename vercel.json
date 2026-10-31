@@ -16,6 +16,10 @@
       "destination": "https://camera-six-remarkable-prep.trycloudflare.com/network"
     },
     {
+      "source": "/swap",
+      "destination": "https://camera-six-remarkable-prep.trycloudflare.com/swap"
+    },
+    {
       "source": "/provider",
       "destination": "https://camera-six-remarkable-prep.trycloudflare.com/provider"
     },

@@ -147,6 +147,7 @@
     .log li .k { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--dim); padding-top: 2px; }
     .log li.think { border-left-color: var(--violet); } .log li.think .k { color: var(--violet); }
     .log li.pay { border-left-color: var(--accent); } .log li.pay .k { color: var(--accent); }
+    .log li.swap { border-left-color: #eab300; } .log li.swap .k { color: #ffd54a; }
     .log li.skip { border-left-color: var(--warn); } .log li.skip .k { color: var(--warn); }
     .log li.error { border-left-color: var(--hot); } .log li.error .k { color: var(--hot); }
     .log li.info .k { color: var(--info); }
@@ -161,6 +162,26 @@
     .fund input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(var(--brand-rgb),.2); }
     .preset:disabled { opacity: .5; cursor: not-allowed; }
     @keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    /* SURGEPASS swap */
+    .swap-grid { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: center; }
+    .swap-grid .v { font-size: 28px; font-weight: 700; line-height: 1.2; color: #ffd54a; }
+    .swap-grid .l { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .swapchart { position: relative; }
+    .swapchart svg { width: 100%; height: 140px; display: block; overflow: visible; }
+    .swapchart polyline { fill: none; stroke: #eab300; stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .swapchart line.grid { stroke: var(--line); vector-effect: non-scaling-stroke; }
+    .swapchart .dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #ffd54a; border: 2px solid var(--bg); transform: translate(-50%, -50%); transition: left .4s var(--ease), top .4s var(--ease); }
+    .swapchart .tip { position: absolute; top: 0; padding: 4px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-2); font-size: 12px; white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+    .swapchart .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+    /* Agent performance */
+    .perf { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 8px 14px; align-items: center; font-size: 13px; }
+    .perf .hd { font-size: 11px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+    .perf .bar { position: relative; height: 18px; border-radius: 4px; background: var(--line); overflow: hidden; }
+    .perf .bar > div { height: 100%; border-radius: 0 4px 4px 0; transition: width .4s var(--ease); }
+    .perf .bar.ok > div { background: var(--accent); } .perf .bar.spend > div { background: var(--info); } .perf .bar.spend.over > div { background: var(--hot); }
+    .perf .bar span { position: absolute; inset: 0 6px; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; color: var(--ink); }
+    @media (max-width: 720px) { .swap-grid { grid-template-columns: 1fr; } }
 
     /* Network impact */
     .net-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
@@ -257,8 +278,8 @@
       </div>
       <nav class="nav" aria-label="Pages">
         <a href="#overview" data-page="overview"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>Overview</a>
-        <a href="#market" data-page="market"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>Live Market</a>
-        <a href="#trace" data-page="trace"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></svg>Trace</a>
+        <a href="#market" data-page="market"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>Agent</a>
+        <a href="#trace" data-page="trace"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></svg>Transaction history</a>
         <a href="#profile" data-page="profile"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>My profile</a>
       </nav>
       <span class="live" id="live" role="status"><span class="dot" aria-hidden="true"></span><span id="live-text">Connecting…</span></span>
@@ -297,10 +318,29 @@
           </div>
           <p class="hint">Every paid call, pass and agent top-up is a real BSV mainnet transaction. Counted since the server started.</p>
         </section>
+        <section class="card" aria-label="SURGEPASS swap">
+          <h2>SURGEPASS swap <span class="count">sats → pass, bonding curve</span></h2>
+          <p class="hint" id="swap-off">Swap not live yet.</p>
+          <div class="swap-grid" id="swap-on" hidden>
+            <div>
+              <div class="v num" id="swap-price">–</div><div class="l">sats for the next pass</div>
+              <div class="v num" id="swap-out">–</div><div class="l">passes in circulation</div>
+            </div>
+            <div class="swapchart" id="swapchart">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Pass price versus passes in circulation">
+                <line class="grid" x1="0" y1="100" x2="100" y2="100"/><polyline id="swap-line"/>
+              </svg>
+              <span class="dot" id="swap-dot" aria-hidden="true"></span>
+              <div class="tip" id="swap-tip" hidden></div>
+              <div class="axis"><span>0 passes</span><span>price rises 50 sats per pass in circulation</span><span id="swap-max"></span></div>
+            </div>
+          </div>
+          <p class="hint">An agent swaps sats into a pass when the pass costs less than its surge bid, then redeems it to jump the queue. Redeemed passes return to the provider, so the price falls again.</p>
+        </section>
       </div>
 
-      <div class="page" id="page-market" data-title="Live Market" hidden>
-        <div class="page-head"><h1>Live Market</h1><p>The priority queue right now. Launch agents or pay for a job yourself.</p></div>
+      <div class="page" id="page-market" data-title="Agent" hidden>
+        <div class="page-head"><h1>Agent</h1><p>The priority queue right now. Launch agents or pay for a job yourself. <span id="pass-price"></span></p></div>
         <div class="row-market">
           <section class="card" aria-label="Queue">
             <h2>Queue <span class="count" id="queue-count"></span></h2>
@@ -317,7 +357,7 @@
             </table></div>
           </section>
           <section class="card" aria-label="Recent jobs">
-            <h2>5 most recent jobs <a class="more" href="#trace">All in Trace →</a></h2>
+            <h2>5 most recent jobs <a class="more" href="#trace">All in Transaction history →</a></h2>
             <table>
               <thead><tr><th>Caller</th><th class="num">Paid</th><th class="num">Wait</th><th>Tx</th></tr></thead>
               <tbody id="recent"></tbody>
@@ -351,7 +391,7 @@
             <div class="lanes" id="lanes"></div>
             <div class="logbar" id="logbar" hidden>
               <select id="log-agent" aria-label="Filter by agent"><option value="">All agents</option></select>
-              <select id="log-kind" aria-label="Filter by event"><option value="">All events</option><option value="think">Think</option><option value="pay">Pay</option><option value="skip">Skip</option><option value="error">Error</option><option value="info">Info</option></select>
+              <select id="log-kind" aria-label="Filter by event"><option value="">All events</option><option value="think">Think</option><option value="pay">Pay</option><option value="swap">Swap</option><option value="skip">Skip</option><option value="error">Error</option><option value="info">Info</option></select>
               <input id="log-search" type="search" placeholder="Search the log" aria-label="Search the log">
               <button class="ghost" id="log-export" type="button">Export JSON</button>
             </div>
@@ -366,6 +406,12 @@
           </div>
         </section>
 
+        <section class="card" aria-label="Agent performance">
+          <h2>Agent performance <span class="count" id="perf-sum"></span></h2>
+          <p class="hint" id="perf-empty">Run agents to see each one's success rate and spending.</p>
+          <div class="perf" id="perf" hidden></div>
+          <p class="hint">Success = tasks that got a queue place (paid or by pass) out of tasks attempted. Spending is against each agent's budget.</p>
+        </section>
         <section class="card" aria-label="Pay for a job yourself">
           <h2>Human interaction · Pay yourself with BSV Desktop</h2>
           <form class="pay" id="form">
@@ -378,8 +424,8 @@
         </section>
       </div>
 
-      <div class="page" id="page-trace" data-title="Trace" hidden>
-        <div class="page-head"><h1>Trace</h1><p>Every served job and its on-chain payment, newest first.</p></div>
+      <div class="page" id="page-trace" data-title="Transaction history" hidden>
+        <div class="page-head"><h1>Transaction history</h1><p>Every served job and its on-chain payment, newest first.</p></div>
         <section class="card" aria-label="All transactions">
           <h2>Transactions <span class="count" id="trace-count"></span></h2>
           <table>

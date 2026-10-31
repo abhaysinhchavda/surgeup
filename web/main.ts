@@ -440,6 +440,33 @@ el('log-export').addEventListener('click', () => {
   setTimeout(() => { URL.revokeObjectURL(a.href) }, 1000)
 })
 
+/** Per agent: tasks that got a queue place out of tasks attempted, and spend against budget. */
+function renderPerf (runs: AgentRun[]): void {
+  const bar = (cls: string, pct: number, label: string): HTMLElement => {
+    const fill = h('div')
+    fill.style.width = `${Math.min(100, pct)}%`
+    return h('div', { className: `bar ${cls}` }, fill, h('span', { textContent: label }))
+  }
+  let won = 0, tried = 0
+  const rows = runs.flatMap(r => {
+    const ok = r.log.filter(l => l.kind === 'pay' && l.text.includes('queue position')).length
+    const failed = r.log.filter(l => l.kind === 'skip' || l.kind === 'error').length
+    const n = ok + failed
+    won += ok; tried += n
+    const rate = n === 0 ? 0 : Math.round((ok / n) * 100)
+    const used = (r.spentSats / r.budgetSats) * 100
+    return [
+      h('span', {}, icon(r.domain), ` ${nameOf(r.domain)}`),
+      bar('ok', rate, n === 0 ? '–' : `${rate}% · ${ok}/${n}`),
+      bar(`spend${used > 100 ? ' over' : ''}`, used, `${r.spentSats} / ${r.budgetSats} sats`)
+    ]
+  })
+  el('perf').replaceChildren(h('span', { className: 'hd', textContent: 'Agent' }), h('span', { className: 'hd', textContent: 'Success rate' }), h('span', { className: 'hd', textContent: 'Spent vs budget' }), ...rows)
+  el('perf').hidden = false
+  el('perf-empty').hidden = true
+  el('perf-sum').textContent = tried === 0 ? '' : `${Math.round((won / tried) * 100)}% overall`
+}
+
 function renderRuns (runs: AgentRun[]): void {
   if (runs.length === 0) return
   const key = runs.map(r => r.id).join(',')
@@ -454,6 +481,7 @@ function renderRuns (runs: AgentRun[]): void {
   const spent = runs.reduce((s, r) => s + r.spentSats, 0)
   const budget = runs.reduce((s, r) => s + r.budgetSats, 0)
   el('run-total').textContent = `${spent} / ${budget} sats`
+  renderPerf(runs)
 
   el('lanes').replaceChildren(...runs.map(r => {
     const fill = h('div')
@@ -688,6 +716,50 @@ function setStat (id: string, text: string): void {
   v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash')
 }
 
+// ---------- SURGEPASS swap ----------
+
+interface SwapInfo { enabled: boolean, priceSats?: number, outstanding?: number, supply?: number, soldOut?: boolean, curve?: Array<{ outstanding: number, priceSats: number }> }
+const SWAP_H = 140 // px, matches .swapchart svg
+let swapCurve: SwapInfo['curve'] = []
+
+async function pollSwap (): Promise<void> {
+  try {
+    const res = await fetch('/swap')
+    const s: SwapInfo = res.ok ? await res.json() : { enabled: false }
+    const live = s.enabled && s.curve !== undefined && s.priceSats !== undefined
+    el('swap-on').hidden = !live
+    el('swap-off').hidden = live
+    el('pass-price').textContent = live ? `Pass price ${s.priceSats} sats${s.soldOut === true ? ' (sold out)' : ''}.` : ''
+    if (!live) return
+    swapCurve = s.curve
+    const supply = s.supply ?? 100
+    const max = Math.max(...s.curve!.map(c => c.priceSats))
+    const pt = (o: number, p: number): [number, number] => [(o / supply) * 100, 100 - (p / max) * 92]
+    el('swap-line').setAttribute('points', s.curve!.map(c => pt(c.outstanding, c.priceSats).join(',')).join(' '))
+    const [x, y] = pt(s.outstanding!, s.priceSats!)
+    const dot = el('swap-dot')
+    dot.style.left = `${x}%`; dot.style.top = `${(y / 100) * SWAP_H}px`
+    setStat('swap-price', s.soldOut === true ? 'Sold out' : fmt(s.priceSats!))
+    setStat('swap-out', `${s.outstanding} / ${supply}`)
+    el('swap-max').textContent = `${supply} passes · ${fmt(max)} sats`
+  } catch {}
+}
+
+el('swapchart').addEventListener('pointermove', e => {
+  const box = el('swapchart').getBoundingClientRect()
+  const c = swapCurve?.at(-1)
+  if (c === undefined) return
+  const supply = c.outstanding
+  const o = Math.round(Math.max(0, Math.min(1, (e.clientX - box.left) / box.width)) * supply)
+  const tip = el('swap-tip')
+  tip.hidden = false
+  tip.style.left = `${(o / supply) * 100}%`
+  const [a, b] = swapCurve!
+  const price = Math.round(a.priceSats + ((b.priceSats - a.priceSats) / (b.outstanding - a.outstanding)) * o) // the curve is linear
+  tip.textContent = `${o} in circulation → ${fmt(price)} sats`
+})
+el('swapchart').addEventListener('pointerleave', () => { el('swap-tip').hidden = true })
+
 async function pollNetwork (): Promise<void> {
   try {
     const n: NetworkStats = await (await fetch('/network')).json()
@@ -704,5 +776,7 @@ async function pollNetwork (): Promise<void> {
 void pollMarket()
 void pollAgents(true)
 void pollNetwork()
+void pollSwap()
 setInterval(() => { void pollMarket(); void pollAgents(); void pollNetwork() }, POLL_MS)
+setInterval(() => { void pollSwap() }, 5000)
 setInterval(() => { void loadWallet() }, 10_000)

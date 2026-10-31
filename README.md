@@ -57,8 +57,14 @@ flowchart TB
   E --> S["Surge price rises<br/>base × (1 + k · depth)"]
   S -. next bid .-> A
 
-  P1["Buy or resell a pass<br/>500 sats, BSV-21"] --> P2["Pass holder<br/>sends 1 SURGEPASS back"]
+  P1["Swap sats into a pass<br/>bonding curve, BSV-21"] --> P2["Pass holder<br/>sends 1 SURGEPASS back"]
   P2 -- "POST /job/pass (verified on the overlay)" --> E
 ```
 
 A pass holder skips payment and enters the queue at position 1.
+
+### The SURGEPASS swap
+
+The DeFi core: anyone swaps sats into SURGEPASS (BSV-21, 100 supply) at a bonding-curve price, `300 + 50 × passes in circulation` sats. Circulation is read from the overlay (supply minus the provider's balance), so a redeemed pass returns to the provider and the price falls again. `GET /swap` publishes the price and curve; `POST /pass` charges it, refuses before payment when sold out, when the overlay cannot quote, or when the price is above the buyer's `maxSats`. Agents compare their surge bid with the pass price on every task: when the pass is cheaper they swap, send the pass back and redeem it with `POST /job/pass`; otherwise they pay the surge in sats.
+
+Live token: [`8cc65b82…a69b_0`](https://whatsonchain.com/tx/8cc65b822b07b26292e213c3c0654f7f36bc1e9e8e227e2e19790bf8c832a69b).

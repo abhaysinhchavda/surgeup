@@ -9,13 +9,12 @@ import { Utils, type WalletInterface } from '@bsv/sdk'
 import { createAuthMiddleware, type AuthRequest } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware, type PaymentRequest } from '@bsv/payment-express-middleware'
 import type { Market } from './market'
-import type { PassService } from './pass'
+import { PASS_STEP_SATS, PASS_SUPPLY, passPrice, type PassQuote, type PassService } from './pass'
 import type { AgentRunner } from './agentRuns'
 import { DOMAINS } from './cases'
 import { acceptBrc29Payment, feeOf, type Brc29Payment } from './payments'
 
 export const MAX_PROMPT = 2000
-export const PASS_SATS = 500
 const CHALLENGE_TTL_MS = 5 * 60_000
 /**
  * A BRC-105 payment rides in the x-bsv-payment header with its whole unconfirmed
@@ -39,11 +38,16 @@ const isBrc29 = (p: any): p is Brc29Payment =>
   isTxid(p.txid) && Number.isInteger(p.outputIndex) && p.outputIndex >= 0 && isBid(p.satoshis) &&
   [p.derivationPrefix, p.derivationSuffix, p.senderIdentityKey].every(s => typeof s === 'string' && s.length > 0 && s.length <= 100)
 
+type PassBuy = Request & { passSats?: number }
+
 /** On-chain activity since the server started: what SurgeAPI brought to the network. */
 export interface NetworkStats { since: number, txs: number, providerSats: number, payers: number, fundings: number, fundedSats: number, avgFeeSats?: number }
 
 export function createSurgeApp (provider: WalletInterface, market: Market, passes?: PassService, agents?: AgentRunner): Express {
   const app = express()
+  // Exact paths only: /PASS or /pass/ would match the route but miss the price check below.
+  app.set('case sensitive routing', true)
+  app.set('strict routing', true)
   // Agent top-ups carry an AtomicBEEF as a JSON byte array, well past the 100kb default.
   app.use(express.json({ limit: '2mb' }))
 
@@ -74,15 +78,44 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     res.json(s)
   })
 
-  // Derivation prefix of each /job 402 challenge → surge price when issued.
+  // Route + derivation prefix of each 402 challenge → price when issued.
   const challenges = new Map<string, { priceSats: number, at: number }>()
   const pruneChallenges = (): void => {
     for (const [p, c] of challenges) { if (Date.now() - c.at <= CHALLENGE_TTL_MS) break; challenges.delete(p) }
   }
+  // The live price, or the price of the challenge this paid retry answers (used once).
+  const challengePrice = (req: Request, res: Response, live: number): number => {
+    pruneChallenges()
+    const raw = req.headers['x-bsv-payment']
+    if (raw === undefined) {
+      res.on('finish', () => {
+        const p = res.getHeader('x-bsv-payment-derivation-prefix')
+        if (res.statusCode === 402 && typeof p === 'string') challenges.set(`${req.path} ${p}`, { priceSats: live, at: Date.now() })
+      })
+      return live
+    }
+    const prefix = typeof raw === 'string' ? prefixOf(raw) : undefined
+    const key = `${req.path} ${prefix}`
+    const issued = prefix === undefined ? undefined : challenges.get(key)
+    if (issued === undefined) return live
+    challenges.delete(key)
+    return issued.priceSats
+  }
+  // A down or hanging overlay means no pass price, never a hung request.
+  const passQuote = async (): Promise<PassQuote | undefined> => passes === undefined
+    ? undefined
+    : await Promise.race([passes.quote().catch(() => undefined), sleep(1500).then(() => undefined)])
 
   // Free routes: plain fetch works (dashboard, agents reading the price).
-  app.get('/price', (_req, res) => {
-    res.json({ priceSats: market.price(), queueDepth: market.snapshot().queueDepth, passSats: PASS_SATS })
+  app.get('/price', async (_req, res) => {
+    res.json({ priceSats: market.price(), queueDepth: market.snapshot().queueDepth, passSats: (await passQuote())?.priceSats ?? null })
+  })
+  app.get('/swap', async (_req, res) => {
+    if (passes === undefined) return res.json({ enabled: false })
+    const q = await passQuote()
+    if (q === undefined) return res.status(503).json({ enabled: true, error: 'pass price unavailable' })
+    const curve = Array.from({ length: PASS_SUPPLY / 10 + 1 }, (_, i) => ({ outstanding: i * 10, priceSats: passPrice(i * 10) }))
+    res.json({ enabled: true, ...q, curve })
   })
   app.get('/state', (_req, res) => { res.json(market.snapshot()) })
   // Pass holders send their pass back to this key before POST /job/pass.
@@ -159,25 +192,25 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     // price when ITS challenge was issued (the surge may have risen while the
     // caller was paying). Each challenge prices one retry; an unknown or reused
     // prefix pays the live price, so an old cheap challenge cannot skip the surge.
-    pruneChallenges()
-    const raw = req.headers['x-bsv-payment']
-    let floor = market.price()
-    if (typeof raw === 'string') {
-      const prefix = prefixOf(raw)
-      const issued = prefix === undefined ? undefined : challenges.get(prefix)
-      if (issued !== undefined) { challenges.delete(prefix!); floor = issued.priceSats }
-    }
+    const floor = challengePrice(req, res, market.price())
     if (bid < floor) return res.status(400).json({ error: 'bid below surge price', priceSats: market.price() })
-    if (raw === undefined) {
-      res.on('finish', () => {
-        const p = res.getHeader('x-bsv-payment-derivation-prefix')
-        if (res.statusCode === 402 && typeof p === 'string') challenges.set(p, { priceSats: floor, at: Date.now() })
-      })
-    }
     next()
   })
   app.post(['/pass', '/job/pass'], (_req, res, next) => {
     if (passes === undefined) return res.status(501).json({ error: 'passes disabled' })
+    next()
+  })
+  // The curve price, refused before payment when it cannot be met. Same
+  // challenge rule as /job: the retry pays the price its challenge quoted.
+  app.post('/pass', async (req, res, next) => {
+    const q = await passQuote()
+    if (q === undefined) return res.status(503).json({ error: 'pass price unavailable' })
+    if (q.soldOut) return res.status(409).json({ error: 'sold out' })
+    const max = req.body?.maxSats
+    if (max !== undefined && !isBid(max)) return res.status(400).json({ error: 'bad maxSats' })
+    if (max !== undefined && q.priceSats > max) return res.status(409).json({ error: 'pass price above maxSats', priceSats: q.priceSats })
+    // An old challenge is honoured for at most one step below the live price, so stockpiled challenges cannot buy the curve cheap.
+    ;(req as PassBuy).passSats = Math.max(challengePrice(req, res, q.priceSats), q.priceSats - PASS_STEP_SATS)
     next()
   })
   app.post('/job/pass', (req, res, next) => {
@@ -192,7 +225,7 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     calculateRequestPrice: req => {
       if (req.method !== 'POST') return 0
       if (req.path === '/job') return req.body.bid
-      if (req.path === '/pass') return PASS_SATS
+      if (req.path === '/pass') return (req as PassBuy).passSats! // set by the /pass pre-check
       return 0
     }
   }))
@@ -210,10 +243,10 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     recordPayment(req)
     try {
       const { txid } = await passes!.issue(caller)
-      res.json({ passTxid: txid })
+      res.json({ passTxid: txid, paidSats: req.payment!.satoshisPaid })
     } catch (e) {
       // ponytail: paid but pass not sent — no automatic refund; operator resends by hand
-      res.status(500).json({ error: 'pass issue failed', detail: String(e) })
+      res.status(500).json({ error: 'pass issue failed', paidSats: req.payment!.satoshisPaid, detail: String(e) })
     }
   })
 

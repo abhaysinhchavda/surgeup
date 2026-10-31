@@ -4,3 +4,4 @@ node_modules
 data/*.db*
 dist
 .DS_Store
+data/overlay.key

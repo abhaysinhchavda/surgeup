@@ -16,9 +16,10 @@ const market = new Market({ baseSats: 100, k: 0.5 })
 
 // Passes stay disabled (501) until npm run deploy-pass puts PASS_TOKEN_ID in .env.
 const tokenId = process.env.PASS_TOKEN_ID
+const overlayUrl = process.env.OVERLAY_URL ?? 'http://localhost:8080'
 const passes = tokenId === undefined || tokenId === ''
   ? undefined
-  : await createPassService(provider, new OverlayClient(process.env.OVERLAY_URL ?? 'http://localhost:8080'), tokenId)
+  : await createPassService(provider, new OverlayClient(overlayUrl), tokenId)
 
 // Dashboard agent runs spend from AGENT_LLM_KEY's wallet, opened on first use.
 let agentWallet: Promise<Wallet> | undefined
@@ -28,7 +29,8 @@ const agents = process.env.AGENT_LLM_KEY === undefined || process.env.AGENT_LLM_
     baseUrl: `http://localhost:${PORT}`,
     wallet: async () => await (agentWallet ??= walletFromEnv('AGENT_LLM_KEY')),
     llm: (process.env.ANTHROPIC_API_KEY ?? '') !== '',
-    token: process.env.AGENT_RUN_TOKEN
+    token: process.env.AGENT_RUN_TOKEN,
+    passes: passes === undefined ? undefined : { tokenId: tokenId!, overlayUrl }
   })
 
 createServer({ maxHeaderSize: MAX_HEADER_BYTES }, createSurgeApp(provider, market, passes, agents)).listen(PORT, () => {

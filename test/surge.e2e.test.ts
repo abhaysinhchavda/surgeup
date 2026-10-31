@@ -11,14 +11,17 @@ import { runLlmAgent } from '../src/llmAgent'
 import { createAgentRunner } from '../src/agentRuns'
 import { Market } from '../src/market'
 import { MAX_HEADER_BYTES, createSurgeApp, mockRunJob, startWorker } from '../src/server'
-import type { PassService } from '../src/pass'
+import type { PassQuote, PassService } from '../src/pass'
 import { createMockChain, type MockChain } from './helpers/mockchain'
 import { createBrc29Payment } from '../src/payments'
 
 const PORT = 18100
 const url = `http://localhost:${PORT}`
 const GOOD_PASS = 'a'.repeat(64)
+const LIVE_QUOTE: PassQuote = { priceSats: 350, outstanding: 1, supply: 100, soldOut: false }
+let quote: () => Promise<PassQuote>
 const fakePasses: PassService = {
+  quote: async () => await quote(),
   issue: async () => ({ txid: 'f'.repeat(64) }),
   redeem: async txid => txid === GOOD_PASS
 }
@@ -59,6 +62,7 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
+  quote = async () => LIVE_QUOTE
   market = new Market({ baseSats: 100, k: 0.5 })
   app = createSurgeApp(provider, market, fakePasses)
 })
@@ -69,7 +73,7 @@ afterEach(() => {
 
 describe('pricing and validation', () => {
   it('price endpoint starts at base', async () => {
-    expect(await getJson('/price')).toEqual({ priceSats: 100, queueDepth: 0, passSats: 500 })
+    expect(await getJson('/price')).toEqual({ priceSats: 100, queueDepth: 0, passSats: 350 })
     expect(await getJson('/provider')).toEqual({ identityKey: (await provider.getPublicKey({ identityKey: true })).publicKey })
   })
 
@@ -268,12 +272,92 @@ describe('dashboard agent runs', () => {
 })
 
 describe('priority pass', () => {
-  it('buying a pass charges PASS_SATS', async () => {
+  it('buying a pass charges the curve price', async () => {
     const before = await spendableSats(provider)
     const res = await post(alice, '/pass', {})
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ passTxid: 'f'.repeat(64) })
-    expect(await spendableSats(provider)).toBe(before + 500)
+    expect(await res.json()).toEqual({ passTxid: 'f'.repeat(64), paidSats: 350 })
+    expect(await spendableSats(provider)).toBe(before + 350)
+  })
+
+  it('a pass bought on a challenge pays that challenge price after the curve rises', async () => {
+    const before = await spendableSats(provider)
+    let calls = 0
+    quote = async () => ({ ...LIVE_QUOTE, priceSats: calls++ === 0 ? 350 : 400 })
+    expect((await post(alice, '/pass', {})).status).toBe(200)
+    expect(await spendableSats(provider)).toBe(before + 350)
+  })
+
+  it('path case or a trailing slash never reaches a route unpriced', async () => {
+    const before = await spendableSats(provider)
+    for (const path of ['/PASS', '/pass/', '/JOB']) {
+      const res = await post(alice, path, { prompt: 'x', bid: 100 })
+      expect(res.status).toBe(404)
+    }
+    expect(await spendableSats(provider)).toBe(before)
+    expect(market.snapshot().queueDepth).toBe(0)
+  })
+
+  it('an old challenge cannot buy far below the live curve', async () => {
+    const before = await spendableSats(provider)
+    let calls = 0
+    quote = async () => ({ ...LIVE_QUOTE, priceSats: calls++ === 0 ? 350 : 600 })
+    // The retry pays the 350 its challenge asked; the server now wants at least 600 − 50, so it refuses uncharged.
+    expect((await post(alice, '/pass', {})).status).toBe(400)
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('a price above the buyer cap is refused before payment', async () => {
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/pass', { maxSats: 300 })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'pass price above maxSats', priceSats: 350 })
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('paid but pass not sent: the 500 says how much was taken', async () => {
+    app = createSurgeApp(provider, market, { ...fakePasses, issue: async () => { throw new Error('overlay down') } })
+    const res = await post(bob, '/pass', {}) // alice still holds the refused payment from the test above
+    expect(res.status).toBe(500)
+    expect(await res.json()).toMatchObject({ error: 'pass issue failed', paidSats: 350 })
+  })
+
+  it('a hanging overlay does not hang the price', async () => {
+    quote = async () => await new Promise<PassQuote>(() => {})
+    expect((await getJson('/price')).passSats).toBeNull()
+  })
+
+  it('sold out: refused before payment', async () => {
+    quote = async () => ({ ...LIVE_QUOTE, soldOut: true })
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/pass', {})
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'sold out' })
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('overlay down: no pass price, buying refused uncharged', async () => {
+    quote = async () => { throw new Error('overlay down') }
+    expect((await getJson('/price')).passSats).toBeNull()
+    const before = await spendableSats(provider)
+    const res = await post(alice, '/pass', {})
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'pass price unavailable' })
+    expect(await spendableSats(provider)).toBe(before)
+  })
+
+  it('swap endpoint publishes the curve', async () => {
+    const s = await getJson('/swap')
+    expect(s).toMatchObject({ enabled: true, priceSats: 350, outstanding: 1, supply: 100, soldOut: false })
+    expect(s.curve).toHaveLength(11)
+    expect(s.curve[0]).toEqual({ outstanding: 0, priceSats: 300 })
+    expect(s.curve[10]).toEqual({ outstanding: 100, priceSats: 5300 })
+  })
+
+  it('without passes: swap disabled, no pass price', async () => {
+    app = createSurgeApp(provider, market)
+    expect(await getJson('/swap')).toEqual({ enabled: false })
+    expect((await getJson('/price')).passSats).toBeNull()
   })
 
   it('a valid pass jumps the queue; a bad one is refused', async () => {

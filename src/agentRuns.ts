@@ -3,13 +3,15 @@
  * wallet within a hard per-run budget. The run log lives in memory; the
  * dashboard polls it through GET /agents.
  */
-import type { WalletInterface } from '@bsv/sdk'
+import { AuthFetch, type WalletInterface } from '@bsv/sdk'
 import { bidFor, submitJob, type Urgency } from './agent'
+import { OverlayClient } from './kit/client/overlayApi'
+import { TokenKit } from './kit/client/token'
 import { DOMAINS, findCase, type AgentCase, type Domain } from './cases'
 import { guardBid, runLlmAgent, type Budget } from './llmAgent'
 
 export type Mode = 'scripted' | 'llm'
-export type LogKind = 'info' | 'think' | 'pay' | 'skip' | 'error'
+export type LogKind = 'info' | 'think' | 'pay' | 'swap' | 'skip' | 'error'
 export interface LogLine { at: number, kind: LogKind, text: string, txid?: string }
 export interface AgentRun {
   id: string
@@ -42,15 +44,47 @@ export interface AgentRunner {
 
 const urgencyFor = (deadlineSec: number): Urgency => deadlineSec <= 60 ? 'high' : deadlineSec <= 300 ? 'medium' : 'low'
 
-/** Rule-based agent: urgency from the deadline, bid capped at what the task is worth. */
-export async function runScripted (o: { wallet: WalletInterface, baseUrl: string, agentCase: AgentCase, budget: Budget, label: string, log: Log }): Promise<void> {
+export interface Swap { kit: TokenKit, tokenId: string }
+
+const postAuth = async (wallet: WalletInterface, url: string, body: object): Promise<{ status: number, body: any }> => {
+  const res = await new AuthFetch(wallet).fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  return { status: res.status, body: await res.json() }
+}
+
+/** The swap route: buy a SURGEPASS with sats, send it back, redeem it for a queue-jumping job. */
+async function swapAndRedeem (o: { wallet: WalletInterface, baseUrl: string, budget: Budget, label: string, log: Log, swap: Swap }, prompt: string, maxSats: number): Promise<void> {
+  // maxSats caps the 402: the server refuses before payment if the curve moved past what this task may spend.
+  const bought = await postAuth(o.wallet, `${o.baseUrl}/pass`, { maxSats: Math.min(maxSats, o.budget.limitSats - o.budget.spentSats) })
+  o.budget.spentSats += bought.body?.paidSats ?? 0 // counted once, here: paid sats are gone whatever happens next
+  if (bought.status !== 200) { o.log('error', `"${prompt}": pass purchase refused (${bought.status}) ${bought.body?.error ?? ''}`); return }
+  o.log('pay', `bought SURGEPASS for ${bought.body.paidSats} sats`, bought.body.passTxid)
+  let passTxid: string | undefined
+  try {
+    await o.swap.kit.sync()
+    const { identityKey } = await (await fetch(`${o.baseUrl}/provider`)).json()
+    passTxid = (await o.swap.kit.send(o.swap.tokenId, 1n, identityKey)).txid
+    const r = await postAuth(o.wallet, `${o.baseUrl}/job/pass`, { prompt, passTxid, label: o.label })
+    if (r.status !== 200) { o.log('error', `"${prompt}": pass ${passTxid} refused (${r.status}) ${r.body?.error ?? ''}`, passTxid); return }
+    o.log('pay', `redeemed the pass, queue position ${r.body.position}`, passTxid)
+  } catch (e) {
+    o.log('error', `"${prompt}": pass ${passTxid ?? bought.body.passTxid} not redeemed: ${String(e)}`, passTxid ?? bought.body.passTxid)
+  }
+}
+
+/** Rule-based agent: urgency from the deadline, bid capped at what the task is worth; swaps into a pass when it is cheaper. */
+export async function runScripted (o: { wallet: WalletInterface, baseUrl: string, agentCase: AgentCase, budget: Budget, label: string, log: Log, swap?: Swap }): Promise<void> {
   for (const t of o.agentCase.tasks) {
     try {
       const urgency = urgencyFor(t.deadlineSec)
       const bidAt = (surge: number): number => Math.min(bidFor(urgency, surge), t.valueSats)
-      const { priceSats } = await (await fetch(`${o.baseUrl}/price`)).json()
+      const { priceSats, passSats } = await (await fetch(`${o.baseUrl}/price`)).json()
       let bid = bidAt(priceSats)
       if (bid < priceSats) { o.log('skip', `"${t.prompt}": surge ${priceSats} sats is above its worth (${t.valueSats}); skipped`); continue }
+      if (o.swap !== undefined && typeof passSats === 'number' && passSats < bid && guardBid(o.budget, passSats).ok) {
+        o.log('swap', `"${t.prompt}": surge bid ${bid} > pass ${passSats} → swapping sats into SURGEPASS`)
+        await swapAndRedeem({ ...o, swap: o.swap }, t.prompt, bid)
+        continue
+      }
       const guard = guardBid(o.budget, bid)
       if (!guard.ok) { o.log('skip', `"${t.prompt}": ${guard.reason}; skipped`); continue }
       o.log('think', `"${t.prompt}": deadline ${t.deadlineSec}s → ${urgency} urgency; surge ${priceSats} → bid ${bid} sats`)
@@ -87,7 +121,7 @@ function serialized (w: WalletInterface): WalletInterface {
   })
 }
 
-export function createAgentRunner (o: { baseUrl: string, wallet: () => Promise<WalletInterface>, llm: boolean, token?: string }): AgentRunner {
+export function createAgentRunner (o: { baseUrl: string, wallet: () => Promise<WalletInterface>, llm: boolean, token?: string, passes?: { tokenId: string, overlayUrl: string } }): AgentRunner {
   let runs: AgentRun[] = []
   let seq = 0
   let shared: Promise<WalletInterface> | undefined
@@ -128,7 +162,8 @@ export function createAgentRunner (o: { baseUrl: string, wallet: () => Promise<W
         const w = await wallet()
         if (mode === 'llm') await runLlmAgent({ wallet: w, baseUrl: o.baseUrl, tasks: agentCase.tasks, budgetSats, label, log, budget })
         else {
-          await runScripted({ wallet: w, baseUrl: o.baseUrl, agentCase, budget, label, log })
+          const swap = o.passes === undefined ? undefined : { kit: new TokenKit(w, new OverlayClient(o.passes.overlayUrl)), tokenId: o.passes.tokenId }
+          await runScripted({ wallet: w, baseUrl: o.baseUrl, agentCase, budget, label, log, swap })
           log('info', `spent ${budget.spentSats} of ${budgetSats} sats`)
         }
         r.spentSats = budget.spentSats
