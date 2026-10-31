@@ -90,3 +90,8 @@ export async function acceptBrc29Payment (
     description
   }, originator)
 }
+
+/** Miner fee of an AtomicBEEF transaction, or undefined when an input's source transaction is not in the BEEF. */
+export function feeOf (beef: number[]): number | undefined {
+  try { return Transaction.fromAtomicBEEF(beef).getFee() } catch { return undefined }
+}

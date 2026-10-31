@@ -13,6 +13,7 @@ import { Market } from '../src/market'
 import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
 import type { PassService } from '../src/pass'
 import { createMockChain, type MockChain } from './helpers/mockchain'
+import { createBrc29Payment } from '../src/payments'
 
 const PORT = 18100
 const url = `http://localhost:${PORT}`
@@ -235,6 +236,22 @@ describe('dashboard agent runs', () => {
       expect(paid).toBeGreaterThan(0)
       expect(paid).toBeLessThanOrEqual(agents[i].budgetSats)
     }
+  })
+
+  it('a dashboard top-up funds the agent wallet, and /network counts it', async () => {
+    app = createSurgeApp(provider, market, fakePasses, createAgentRunner({ baseUrl: url, wallet: async () => bob, llm: false }))
+    const fund = async (body: unknown): Promise<Response> => await fetch(`${url}/agents/fund`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+    expect((await fund({ tx: [1] })).status).toBe(400)
+    const before = await spendableSats(bob)
+    const p = await createBrc29Payment(alice, (await bob.getPublicKey({ identityKey: true })).publicKey, 1234)
+    expect((await fund(p)).status).toBe(200)
+    expect(await spendableSats(bob)).toBe(before + 1234)
+    expect((await post(alice, '/job', { prompt: 'hi', bid: 1000 })).status).toBe(200)
+    const n = await getJson('/network')
+    expect(n).toMatchObject({ txs: 2, providerSats: 1000, payers: 1, fundings: 1, fundedSats: 1234 })
+    expect(n.avgFeeSats).toBeGreaterThan(0)
   })
 })
 

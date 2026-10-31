@@ -12,6 +12,10 @@
       "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/state"
     },
     {
+      "source": "/network",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/network"
+    },
+    {
       "source": "/provider",
       "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/provider"
     },
@@ -26,6 +30,10 @@
     {
       "source": "/agents/wallet",
       "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/wallet"
+    },
+    {
+      "source": "/agents/fund",
+      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/agents/fund"
     },
     {
       "source": "/pass",

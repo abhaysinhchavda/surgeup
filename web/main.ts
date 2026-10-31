@@ -7,6 +7,8 @@ import { AuthFetch, WalletClient } from '@bsv/sdk'
 import type { Job, MarketSnapshot } from '../src/market'
 import type { Domain } from '../src/cases'
 import type { AgentRun } from '../src/agentRuns'
+import type { NetworkStats } from '../src/server'
+import { createBrc29Payment, type Brc29Payment } from '../src/payments'
 
 const POLL_MS = 1000
 const RESULT_TIMEOUT_MS = 5 * 60_000
@@ -280,6 +282,7 @@ async function loadWallet (): Promise<void> {
     walletSats = w.sats
     el('wallet-sats').textContent = `${w.sats} sats`
     el('copy-key').hidden = false
+    el<HTMLButtonElement>('fund').disabled = false
     changed()
   } catch {
     el('wallet-sats').textContent = 'unavailable'
@@ -307,6 +310,7 @@ async function pollAgents (first = false): Promise<void> {
       el('token-field').hidden = !a.tokenRequired
       if (!a.enabled) runMsg('Agent console is off: the server needs AGENT_LLM_KEY in .env.', true)
       void loadWallet()
+      if (a.enabled) void recoverFund()
     }
     renderRuns(a.runs ?? [])
   } catch {
@@ -398,6 +402,86 @@ el<HTMLFormElement>('form').addEventListener('submit', e => {
   })()
 })
 
+// ---------- Fund the agents ----------
+
+// A payment the agent has not accepted yet is kept here, so a failed hand-over
+// never strands the sats: the next page load delivers it without paying again.
+const PENDING_FUND = 'surgeapi.pending-fund'
+
+function fundMsg (text: string, isError = false, txid?: string): void {
+  const m = el('fund-msg')
+  m.className = isError ? 'hint err' : 'hint'
+  m.replaceChildren(text)
+  if (txid !== undefined) m.append(txLink(txid, 'view tx ↗'))
+}
+
+function pendingFund (): Brc29Payment | undefined {
+  try { const raw = localStorage.getItem(PENDING_FUND); return raw === null ? undefined : JSON.parse(raw) } catch { return undefined }
+}
+
+async function deliverFund (p: Brc29Payment): Promise<void> {
+  const res = await fetch('/agents/fund', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+  try { localStorage.removeItem(PENDING_FUND) } catch {}
+  fundMsg(`The agents received ${p.satoshis} sats from your wallet.`, false, p.txid)
+  void loadWallet()
+  void pollNetwork()
+}
+
+el('fund').addEventListener('click', () => {
+  const sats = Number(el<HTMLInputElement>('fund-sats').value)
+  if (!Number.isInteger(sats) || sats < 1 || sats > 100_000) { fundMsg('Enter whole sats, 1–100000.', true); return }
+  const button = el<HTMLButtonElement>('fund')
+  button.disabled = true
+  fundMsg(`Approve the ${sats}-sat payment in BSV Desktop…`)
+  void (async () => {
+    try {
+      wallet ??= new WalletClient('auto')
+      const p = await createBrc29Payment(wallet, identityKey, sats, 'Fund SurgeAPI agents')
+      try { localStorage.setItem(PENDING_FUND, JSON.stringify(p)) } catch {}
+      fundMsg('Paid. Handing the payment to the agent wallet…')
+      await deliverFund(p)
+    } catch (e) {
+      fundMsg(`${String(e)}${pendingFund() === undefined ? '' : ' Your payment is saved; reload the page to deliver it.'}`, true)
+    } finally {
+      button.disabled = identityKey === ''
+    }
+  })()
+})
+
+async function recoverFund (): Promise<void> {
+  const p = pendingFund()
+  if (p === undefined) return
+  fundMsg(`Delivering your earlier ${p.satoshis}-sat top-up…`)
+  try { await deliverFund(p) } catch (e) { fundMsg(`Earlier top-up not delivered yet: ${String(e)}`, true) }
+}
+
+// ---------- Network impact ----------
+
+const fmt = (n: number): string => n.toLocaleString('en-US')
+function setStat (id: string, text: string): void {
+  const v = el(id)
+  if (v.textContent === text) return
+  v.textContent = text
+  v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash')
+}
+
+async function pollNetwork (): Promise<void> {
+  try {
+    const n: NetworkStats = await (await fetch('/network')).json()
+    setStat('net-txs', fmt(n.txs))
+    setStat('net-sats', fmt(n.providerSats))
+    setStat('net-payers', fmt(n.payers))
+    setStat('net-funded', fmt(n.fundedSats))
+    setStat('net-fee', n.avgFeeSats === undefined ? '–' : fmt(n.avgFeeSats))
+    if (walletSats !== undefined) setStat('net-capital', fmt(walletSats))
+    el('net-since').textContent = `since ${new Date(n.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  } catch {}
+}
+
 void pollMarket()
 void pollAgents(true)
-setInterval(() => { void pollMarket(); void pollAgents() }, POLL_MS)
+void pollNetwork()
+setInterval(() => { void pollMarket(); void pollAgents(); void pollNetwork() }, POLL_MS)
+setInterval(() => { void loadWallet() }, 10_000)

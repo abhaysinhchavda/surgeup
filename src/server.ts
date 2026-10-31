@@ -5,13 +5,14 @@
  * middleware, so nobody is charged for a request that cannot be served.
  */
 import express, { type Express, type Request, type Response } from 'express'
-import type { WalletInterface } from '@bsv/sdk'
+import { Utils, type WalletInterface } from '@bsv/sdk'
 import { createAuthMiddleware, type AuthRequest } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware, type PaymentRequest } from '@bsv/payment-express-middleware'
 import type { Market } from './market'
 import type { PassService } from './pass'
 import type { AgentRunner } from './agentRuns'
 import { DOMAINS } from './cases'
+import { acceptBrc29Payment, feeOf, type Brc29Payment } from './payments'
 
 export const MAX_PROMPT = 2000
 export const PASS_SATS = 500
@@ -27,10 +28,45 @@ const prefixOf = (raw: string): string | undefined => {
 }
 const labelFor =(body: any, identityKey: string): string =>
   typeof body?.label === 'string' && body.label.length > 0 ? body.label.slice(0, 24) : identityKey.slice(0, 8)
+const isBrc29 = (p: any): p is Brc29Payment =>
+  Array.isArray(p?.tx) && p.tx.length > 0 && p.tx.every((b: unknown) => Number.isInteger(b) && (b as number) >= 0 && (b as number) <= 255) &&
+  isTxid(p.txid) && Number.isInteger(p.outputIndex) && p.outputIndex >= 0 && isBid(p.satoshis) &&
+  [p.derivationPrefix, p.derivationSuffix, p.senderIdentityKey].every(s => typeof s === 'string' && s.length > 0 && s.length <= 100)
+
+/** On-chain activity since the server started: what SurgeAPI brought to the network. */
+export interface NetworkStats { since: number, txs: number, providerSats: number, payers: number, fundings: number, fundedSats: number, avgFeeSats?: number }
 
 export function createSurgeApp (provider: WalletInterface, market: Market, passes?: PassService, agents?: AgentRunner): Express {
   const app = express()
-  app.use(express.json())
+  // Agent top-ups carry an AtomicBEEF as a JSON byte array, well past the 100kb default.
+  app.use(express.json({ limit: '2mb' }))
+
+  const net = { since: Date.now(), txids: new Set<string>(), payers: new Set<string>(), providerSats: 0, fundings: 0, fundedSats: 0, feeSats: 0, feeTxs: 0 }
+  const record = (txid: string, beef: number[] | undefined, o: { payer?: string, providerSats?: number, fundedSats?: number }): void => {
+    if (net.txids.has(txid)) return
+    net.txids.add(txid)
+    if (o.payer !== undefined) net.payers.add(o.payer)
+    net.providerSats += o.providerSats ?? 0
+    if (o.fundedSats !== undefined) { net.fundings++; net.fundedSats += o.fundedSats }
+    const fee = beef === undefined ? undefined : feeOf(beef)
+    if (fee !== undefined) { net.feeSats += fee; net.feeTxs++ }
+  }
+  const recordPayment = (req: PaymentRequest): void => {
+    const p = req.payment!
+    record(p.txid!, typeof p.tx === 'string' ? Utils.toArray(p.tx, 'base64') : undefined, { payer: callerOf(req), providerSats: p.satoshisPaid })
+  }
+  app.get('/network', (_req, res) => {
+    const s: NetworkStats = {
+      since: net.since,
+      txs: net.txids.size,
+      providerSats: net.providerSats,
+      payers: net.payers.size,
+      fundings: net.fundings,
+      fundedSats: net.fundedSats,
+      avgFeeSats: net.feeTxs === 0 ? undefined : Math.round(net.feeSats / net.feeTxs)
+    }
+    res.json(s)
+  })
 
   // Derivation prefix of each /job 402 challenge → surge price when issued.
   const challenges = new Map<string, { priceSats: number, at: number }>()
@@ -89,6 +125,20 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
     if ('error' in r) return res.status(r.status).json({ error: r.error })
     res.json({ runs: r })
   })
+  // Top-up from the dashboard: the browser's wallet pays the agent (BRC-29) and
+  // posts the payment here for the agent wallet to accept. Money in only, so no token.
+  app.post('/agents/fund', async (req, res) => {
+    if (agents === undefined) return res.status(501).json({ error: 'agents disabled' })
+    const p = req.body
+    if (!isBrc29(p)) return res.status(400).json({ error: 'bad payment' })
+    try {
+      await acceptBrc29Payment(await agents.wallet(), p, undefined, 'Top-up from the dashboard')
+      record(p.txid, p.tx, { payer: p.senderIdentityKey, fundedSats: p.satoshis })
+      res.json({ txid: p.txid, sats: p.satoshis })
+    } catch (e) {
+      res.status(400).json({ error: String(e) })
+    }
+  })
 
   // Auth before the checks: AuthFetch rejects any unsigned response, so even a
   // 400 must pass through the auth middleware to reach the caller.
@@ -144,12 +194,14 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
   app.post('/job', (req: PaymentRequest, res: Response) => {
     const caller = callerOf(req)
     const payment = req.payment!
+    recordPayment(req)
     const job = market.enqueue({ caller, label: labelFor(req.body, caller), prompt: req.body.prompt, paidSats: payment.satoshisPaid, txid: payment.txid })
     res.json({ jobId: job.id, paidSats: job.paidSats, txid: job.txid, position: market.position(job.id) })
   })
 
-  app.post('/pass', async (req: Request, res: Response) => {
+  app.post('/pass', async (req: PaymentRequest, res: Response) => {
     const caller = callerOf(req)
+    recordPayment(req)
     try {
       const { txid } = await passes!.issue(caller)
       res.json({ passTxid: txid })
@@ -162,6 +214,7 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
   app.post('/job/pass', async (req: Request, res: Response) => {
     const caller = callerOf(req)
     if (!(await passes!.redeem(req.body.passTxid, caller))) return res.status(400).json({ error: 'invalid pass' })
+    record(req.body.passTxid, undefined, { payer: caller })
     const job = market.enqueue({ caller, label: labelFor(req.body, caller), prompt: req.body.prompt, paidSats: 0, txid: req.body.passTxid, viaPass: true })
     res.json({ jobId: job.id, position: market.position(job.id) })
   })

@@ -124,10 +124,25 @@
     .wallet b { color: var(--ink); }
     .ghost { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
     .ghost:hover { color: var(--ink); border-color: var(--dim); }
+    .fund { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .fund input { width: 110px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+    .fund input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
+    .preset:disabled { opacity: .5; cursor: not-allowed; }
     @keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+    /* Network impact */
+    .net-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    .net-grid > div { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(15,23,42,.5); min-width: 0; }
+    .net-grid .v { font-size: 28px; font-weight: 700; line-height: 1.2; }
+    .net-grid .l { font-size: 12px; color: var(--muted); }
+    .net-grid .human .v { color: var(--violet); } .net-grid .capital .v { color: var(--info); } .net-grid .chain .v { color: var(--accent); }
+
     /* Tables */
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .row-market { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.2fr); gap: 16px; }
+    .row-market .net-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row-market .net-grid .v { font-size: 24px; }
+    .row-act { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.6fr); gap: 16px; align-items: start; }
+    .row-act > [aria-label="Pay for a job yourself"] { position: sticky; top: 16px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
     th { font-size: 11px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
@@ -140,7 +155,8 @@
     .scroll { max-height: 320px; overflow-y: auto; }
 
     /* Pay form */
-    form.pay { display: grid; grid-template-columns: 1fr 140px auto; gap: 12px; align-items: end; }
+    form.pay { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+    form.pay .field:first-child { grid-column: 1 / -1; }
     .field input { font: inherit; font-size: 15px; padding: 10px 12px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); min-width: 0; }
     .field input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
     #result { white-space: pre-wrap; margin: 10px 0 0; padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
@@ -149,10 +165,14 @@
     @media (max-width: 1024px) {
       .kpis { grid-template-columns: repeat(3, 1fr); } .kpis .surge { grid-column: 1 / -1; }
       .console { grid-template-columns: 1fr; }
+      .row-market { grid-template-columns: 1fr 1fr; } .row-market > [aria-label="Network impact"] { grid-column: 1 / -1; }
+      .row-market .net-grid { grid-template-columns: repeat(3, 1fr); }
+      .row-act { grid-template-columns: 1fr; } .row-act > [aria-label="Pay for a job yourself"] { position: static; }
     }
     @media (max-width: 720px) {
-      .grid2, .roster, form.pay { grid-template-columns: 1fr; }
+      .row-market, .roster { grid-template-columns: 1fr; }
       .controls { grid-template-columns: 1fr; }
+      .row-market .net-grid { grid-template-columns: repeat(2, 1fr); } .row-market .net-grid .v { font-size: 22px; }
       .surge { grid-template-columns: 1fr; } .surge .value { font-size: 42px; }
       .tab { flex: 1 1 calc(50% - 8px); justify-content: center; }
     }
@@ -185,37 +205,7 @@
       <div class="card kpi"><div class="label">Sats earned</div><div class="value num" id="earned">–</div><div class="sub">recent, on-chain</div></div>
     </section>
 
-    <section class="card console" aria-label="Agent console">
-      <div>
-        <h2><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Agent console</h2>
-        <div class="toolbar">
-          <button class="preset" type="button" id="preset-rush">Rush hour <small>6 urgent cases · 800 each</small></button>
-          <button class="preset" type="button" id="preset-quiet">Quiet day <small>6 routine cases · 300 each</small></button>
-          <span class="spacer"></span>
-          <button class="ghost" type="button" id="select-all">Select all</button>
-          <button class="ghost" type="button" id="select-none">Clear</button>
-        </div>
-        <div class="roster" id="roster"></div>
-        <label class="field token" id="token-field" hidden>Run token (set by the operator)
-          <input id="token" type="password" autocomplete="off">
-        </label>
-        <div class="launch">
-          <span class="sum" id="summary"></span>
-          <button class="btn" id="run" type="button"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg><span id="run-label">Run agents</span></button>
-        </div>
-        <p class="hint" id="run-msg" role="status"></p>
-      </div>
-
-      <div aria-label="Live run">
-        <h2>Live run <span class="count" id="run-total"></span></h2>
-        <div class="lanes" id="lanes"></div>
-        <ol class="log" id="log" aria-live="polite"></ol>
-        <div class="empty-log" id="empty-log">Tick the agents you want, set each budget, then press <b>Run</b>, or use a preset. Every decision and payment streams in here.</div>
-        <div class="wallet"><span>Agent wallet</span><b class="num" id="wallet-sats">–</b><button class="ghost" id="copy-key" type="button" hidden>Copy identity key</button></div>
-      </div>
-    </section>
-
-    <div class="grid2">
+    <div class="row-market">
       <section class="card" aria-label="Queue">
         <h2>Queue <span class="count" id="queue-count"></span></h2>
         <div class="scroll"><table>
@@ -230,18 +220,66 @@
           <tbody id="served"></tbody>
         </table></div>
       </section>
+      <section class="card" aria-label="Network impact">
+        <h2><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Network impact <span class="count" id="net-since"></span></h2>
+        <div class="net-grid" aria-live="polite">
+          <div class="chain"><div class="v num" id="net-txs">–</div><div class="l">on-chain transactions</div></div>
+          <div class="chain"><div class="v num" id="net-sats">–</div><div class="l">sats paid to API providers</div></div>
+          <div><div class="v num" id="net-payers">–</div><div class="l">unique paying wallets</div></div>
+          <div class="human"><div class="v num" id="net-funded">–</div><div class="l">sats people moved into agents</div></div>
+          <div class="capital"><div class="v num" id="net-capital">–</div><div class="l">sats held by agents, ready to spend</div></div>
+          <div><div class="v num" id="net-fee">–</div><div class="l">avg miner fee per tx (sats)</div></div>
+        </div>
+        <p class="hint">Every paid call, pass and agent top-up is a real BSV mainnet transaction. Counted since the server started.</p>
+      </section>
     </div>
 
-    <section class="card" aria-label="Pay for a job yourself">
-      <h2>Pay yourself with BSV Desktop</h2>
-      <form class="pay" id="form">
-        <label class="field">Prompt <input id="prompt" required maxlength="2000" value="Summarise today's incident report"></label>
-        <label class="field">Bid (sats) <input id="bid" class="num" type="number" min="1" step="1" required></label>
-        <button class="btn" id="pay" type="submit">Pay &amp; queue</button>
-      </form>
-      <p class="hint" id="msg" role="status"></p>
-      <pre id="result"></pre>
-    </section>
+    <div class="row-act">
+      <section class="card" aria-label="Pay for a job yourself">
+        <h2>Pay yourself with BSV Desktop</h2>
+        <form class="pay" id="form">
+          <label class="field">Prompt <input id="prompt" required maxlength="2000" value="Summarise today's incident report"></label>
+          <label class="field">Bid (sats) <input id="bid" class="num" type="number" min="1" step="1" required></label>
+          <button class="btn" id="pay" type="submit">Pay &amp; queue</button>
+        </form>
+        <p class="hint" id="msg" role="status"></p>
+        <pre id="result"></pre>
+      </section>
+      <section class="card console" aria-label="Agent console">
+        <div>
+          <h2><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Agent console</h2>
+          <div class="toolbar">
+            <button class="preset" type="button" id="preset-rush">Rush hour <small>6 urgent cases · 800 each</small></button>
+            <button class="preset" type="button" id="preset-quiet">Quiet day <small>6 routine cases · 300 each</small></button>
+            <span class="spacer"></span>
+            <button class="ghost" type="button" id="select-all">Select all</button>
+            <button class="ghost" type="button" id="select-none">Clear</button>
+          </div>
+          <div class="roster" id="roster"></div>
+          <label class="field token" id="token-field" hidden>Run token (set by the operator)
+            <input id="token" type="password" autocomplete="off">
+          </label>
+          <div class="launch">
+            <span class="sum" id="summary"></span>
+            <button class="btn" id="run" type="button"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg><span id="run-label">Run agents</span></button>
+          </div>
+          <p class="hint" id="run-msg" role="status"></p>
+        </div>
+
+        <div aria-label="Live run">
+          <h2>Live run <span class="count" id="run-total"></span></h2>
+          <div class="lanes" id="lanes"></div>
+          <ol class="log" id="log" aria-live="polite"></ol>
+          <div class="empty-log" id="empty-log">Tick the agents you want, set each budget, then press <b>Run</b>, or use a preset. Every decision and payment streams in here.</div>
+          <div class="wallet"><span>Agent wallet</span><b class="num" id="wallet-sats">–</b><button class="ghost" id="copy-key" type="button" hidden>Copy identity key</button></div>
+          <div class="fund">
+            <input id="fund-sats" type="number" min="1" max="100000" step="1" value="1000" inputmode="numeric" aria-label="Top-up amount in sats">
+            <button class="preset" id="fund" type="button" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Fund agents from my wallet</button>
+          </div>
+          <p class="hint" id="fund-msg" role="status"></p>
+        </div>
+      </section>
+    </div>
   </main>
   <script type="module" src="/main.ts"></script>
 </body>
