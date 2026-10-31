@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Market } from '../src/market'
+import { Market, SERVED_LIMIT } from '../src/market'
 
 const cfg = { baseSats: 100, k: 0.5 }
 const job = (paidSats: number, viaPass = false) => ({ caller: 'k', label: 'L', prompt: 'p', paidSats, txid: 't', viaPass })
@@ -44,14 +44,14 @@ describe('Market', () => {
     let t = 0
     const m = new Market(cfg, () => ++t)
     let last = ''
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < SERVED_LIMIT + 5; i++) {
       const j = m.enqueue(job(100))
       m.next()
       m.complete(j.id, `r${i}`)
       last = j.id
     }
     const s = m.snapshot()
-    expect(s.served).toHaveLength(20)
+    expect(s.served).toHaveLength(SERVED_LIMIT)
     expect(s.served[0].id).toBe(last)
     expect(s.served[0].status).toBe('done')
     expect(s.queueDepth).toBe(0)

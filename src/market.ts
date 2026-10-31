@@ -9,7 +9,7 @@ export type JobStatus = 'queued' | 'running' | 'done'
 export interface Job { id: string, caller: string, label: string, prompt: string, paidSats: number, txid: string, viaPass: boolean, seq: number, enqueuedAt: number, status: JobStatus, startedAt?: number, doneAt?: number, result?: string }
 export interface MarketSnapshot { priceSats: number, queueDepth: number, queue: Job[], running?: Job, served: Job[] }
 
-const SERVED_LIMIT = 20
+export const SERVED_LIMIT = 200
 
 /** Serve order: pass holders first, then most sats paid, then arrival. */
 const byPriority = (a: Job, b: Job): number =>

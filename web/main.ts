@@ -100,14 +100,77 @@ function renderMarket (s: MarketSnapshot): void {
   el('queue').replaceChildren(...(queue.length > 0 ? queue : [emptyRow('Queue empty', 3)]))
   el('queue-count').textContent = s.running === undefined ? '' : `1 running · ${s.queue.length} waiting`
 
-  const served = s.served.map(j => tr([
-    who(j.label, j.viaPass),
-    paid(j),
-    j.startedAt === undefined ? '–' : `${((j.startedAt - j.enqueuedAt) / 1000).toFixed(1)} s`,
-    txLink(j.txid)
-  ], [1, 2]))
-  el('served').replaceChildren(...(served.length > 0 ? served : [emptyRow('No jobs yet', 4)]))
+  const servedRow = (j: Job): HTMLTableRowElement => tr([who(j.label, j.viaPass), paid(j), waitOf(j), txLink(j.txid)], [1, 2])
+  const rows = (jobs: Job[]): HTMLTableRowElement[] => jobs.length > 0 ? jobs.map(servedRow) : [emptyRow('No jobs yet', 4)]
+  el('recent').replaceChildren(...rows(s.served.slice(0, 5)))
+  el('trace').replaceChildren(...rows(s.served))
+  el('trace-count').textContent = `${s.served.length} job${s.served.length === 1 ? '' : 's'}`
+  renderProfile(s)
 }
+const waitOf = (j: Job): string => j.startedAt === undefined ? '–' : `${((j.startedAt - j.enqueuedAt) / 1000).toFixed(1)} s`
+
+// ---------- Pages ----------
+
+const PAGES = ['overview', 'market', 'trace', 'profile']
+function route (): void {
+  const page = PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview'
+  for (const p of PAGES) el(`page-${p}`).hidden = p !== page
+  document.querySelectorAll<HTMLAnchorElement>('.nav a').forEach(a => {
+    if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current')
+  })
+  document.title = `${el(`page-${page}`).dataset.title ?? ''} · SurgeAPI`
+  window.scrollTo(0, 0)
+}
+window.addEventListener('hashchange', route)
+route()
+
+// ---------- My profile ----------
+
+const ME_KEY = 'surgeapi.me' // the public identity key only, to restore the profile on reload
+let me: string | undefined
+try { me = localStorage.getItem(ME_KEY) ?? undefined } catch {}
+let lastSnapshot: MarketSnapshot | undefined
+
+function renderProfile (s: MarketSnapshot): void {
+  lastSnapshot = s
+  if (me === undefined) return
+  const all = [...(s.running === undefined ? [] : [s.running]), ...s.queue, ...s.served].filter(j => j.caller === me)
+  const done = all.filter(j => j.startedAt !== undefined)
+  el('me-jobs').textContent = String(all.length)
+  el('me-spent').textContent = fmt(all.reduce((sum, j) => sum + j.paidSats, 0))
+  el('me-wait').textContent = done.length === 0 ? '–' : `${(done.reduce((sum, j) => sum + j.startedAt! - j.enqueuedAt, 0) / done.length / 1000).toFixed(1)} s`
+  el('me-table').replaceChildren(...(all.length > 0
+    ? all.map(j => { const r = tr([j.prompt, j.status, paid(j), txLink(j.txid)], [2]); r.cells[0].className = 'prompt'; r.cells[0].title = j.prompt; return r })
+    : [emptyRow('No jobs from this wallet yet. Pay for one on Live Market.', 4)]))
+}
+
+function showMe (): void {
+  if (me === undefined) return
+  const copy = h('button', { className: 'ghost', type: 'button', textContent: 'Copy' })
+  copy.addEventListener('click', () => { void navigator.clipboard.writeText(me!).then(() => { copy.textContent = 'Copied' }) })
+  el('me-key').replaceChildren(h('span', { textContent: 'Identity key' }), h('code', { className: 'mono', textContent: me }), copy)
+  el('connect').textContent = 'Reconnect BSV Desktop'
+  if (lastSnapshot !== undefined) renderProfile(lastSnapshot)
+}
+showMe()
+
+el('connect').addEventListener('click', () => {
+  const msg = el('me-msg')
+  msg.className = 'hint'
+  msg.textContent = 'Approve in BSV Desktop…'
+  void (async () => {
+    try {
+      wallet ??= new WalletClient('auto')
+      me = (await wallet.getPublicKey({ identityKey: true })).publicKey
+      try { localStorage.setItem(ME_KEY, me) } catch {}
+      msg.textContent = ''
+      showMe()
+    } catch (e) {
+      msg.className = 'hint err'
+      msg.textContent = `Could not reach BSV Desktop: ${String(e)}`
+    }
+  })()
+})
 
 function setLive (ok: boolean): void {
   el('live').className = `live ${ok ? 'on' : 'off'}`
