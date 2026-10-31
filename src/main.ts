@@ -1,4 +1,4 @@
-/** Starts the SurgeAPI provider: mainnet wallet, market, HTTP server on :3000, worker. */
+/** Starts the SurgeUp provider: mainnet wallet, market, HTTP server on :3000, worker. */
 import { createServer } from 'node:http'
 import type { Wallet } from '@bsv/wallet-toolbox'
 import { createAgentRunner } from './agentRuns'
@@ -34,7 +34,7 @@ const agents = process.env.AGENT_LLM_KEY === undefined || process.env.AGENT_LLM_
   })
 
 createServer({ maxHeaderSize: MAX_HEADER_BYTES }, createSurgeApp(provider, market, passes, agents)).listen(PORT, () => {
-  console.log(`SurgeAPI on http://localhost:${PORT}`)
+  console.log(`SurgeUp on http://localhost:${PORT}`)
   console.log(`Provider identity key: ${publicKey}`)
   console.log(passes === undefined ? 'Passes disabled (no PASS_TOKEN_ID)' : `Passes enabled: ${tokenId}`)
   console.log(agents === undefined ? 'Agent console disabled (no AGENT_LLM_KEY)' : `Agent console enabled (Claude mode ${agents.llm ? 'on' : 'off: no ANTHROPIC_API_KEY'})`)

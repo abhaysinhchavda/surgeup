@@ -1,4 +1,6 @@
-# SurgeAPI
+# SurgeUp
+
+*Formerly SurgeAPI.*
 
 **A pay-per-call AI API on BSV with a live priority market.** Every call pays a surge price in sats that rises with queue depth; callers can bid above it, and the highest-paid job is served next. AI agents pay for themselves from their own wallets. A BSV-21 priority pass lets a holder jump the queue, and it can be resold.
 
@@ -17,7 +19,7 @@ flowchart TB
     DB["Dashboard :5173<br/>polls /state"]
   end
 
-  subgraph Server["SurgeAPI server :3000"]
+  subgraph Server["SurgeUp server :3000"]
     VAL["Validation<br/>prompt, bid ≥ surge"]
     PAY["Auth + payment<br/>BRC-103/104, BRC-105"]
     FREE["Free routes<br/>/price /state /job/:id"]

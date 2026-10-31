@@ -214,7 +214,7 @@ function route (): void {
   document.querySelectorAll<HTMLAnchorElement>('.nav a').forEach(a => {
     if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current')
   })
-  document.title = `${el(`page-${page}`).dataset.title ?? ''} · SurgeAPI`
+  document.title = `${el(`page-${page}`).dataset.title ?? ''} · SurgeUp`
   window.scrollTo(0, 0)
 }
 window.addEventListener('hashchange', route)
@@ -687,7 +687,7 @@ el('fund').addEventListener('click', () => {
   void (async () => {
     try {
       wallet ??= new WalletClient('auto')
-      const p = await createBrc29Payment(wallet, identityKey, sats, 'Fund SurgeAPI agents')
+      const p = await createBrc29Payment(wallet, identityKey, sats, 'Fund SurgeUp agents')
       try { localStorage.setItem(PENDING_FUND, JSON.stringify(p)) } catch {}
       fundMsg('Paid. Handing the payment to the agent wallet…')
       await deliverFund(p)
