@@ -17,6 +17,12 @@ import { acceptBrc29Payment, feeOf, type Brc29Payment } from './payments'
 export const MAX_PROMPT = 2000
 export const PASS_SATS = 500
 const CHALLENGE_TTL_MS = 5 * 60_000
+/**
+ * A BRC-105 payment rides in the x-bsv-payment header with its whole unconfirmed
+ * ancestry (~350 base64 bytes per link). Node refuses headers past 16 KB with a 431,
+ * after the payer has already broadcast, so allow room for MAX_BEEF_DEPTH links.
+ */
+export const MAX_HEADER_BYTES = 256 * 1024
 
 const isPrompt = (p: unknown): p is string => typeof p === 'string' && p.length > 0 && p.length <= MAX_PROMPT
 const isBid = (b: unknown): b is number => typeof b === 'number' && Number.isInteger(b) && b > 0

@@ -11,11 +11,19 @@ import { basename, dirname } from 'node:path'
 import { PrivateKey, WhatsOnChain } from '@bsv/sdk'
 import { Setup, type Wallet } from '@bsv/wallet-toolbox'
 
+// wallet-toolbox refuses to build a payment whose unconfirmed ancestry is 12+ deep.
+// Our agents pay many times per block, each spending the last payment's change,
+// so a busy run passes 12 within minutes and every later payment fails until a
+// block lands. 100 covers several full agent runs between blocks.
+// ponytail: a deeper chain still fails; split coins per agent if runs outgrow it.
+export const MAX_BEEF_DEPTH = 100
+
 export async function makeServerWallet (rootKeyHex: string, filePath: string): Promise<Wallet> {
   mkdirSync(dirname(filePath), { recursive: true })
   const identityKey = PrivateKey.fromHex(rootKeyHex).toPublicKey().toString()
   const env = { chain: 'main' as const, identityKey, identityKey2: identityKey, taalApiKey: '', devKeys: {}, mySQLConnection: '{}', filePath }
   const setup = await Setup.createWalletSQLite({ env, rootKeyHex, filePath, databaseName: basename(filePath, '.sqlite').replace(/-/g, '_') })
+  setup.activeStorage.maxRecursionDepth = MAX_BEEF_DEPTH
   void setup.monitor.startTasks() // tracks proofs, retries broadcasts
   // Chaintracks can lag behind just-mined blocks; a payer's fresh proof is then
   // rejected as invalid AtomicBEEF after the payer has already broadcast. Fall

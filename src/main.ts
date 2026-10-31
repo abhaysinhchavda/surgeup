@@ -1,10 +1,11 @@
 /** Starts the SurgeAPI provider: mainnet wallet, market, HTTP server on :3000, worker. */
+import { createServer } from 'node:http'
 import type { Wallet } from '@bsv/wallet-toolbox'
 import { createAgentRunner } from './agentRuns'
 import { OverlayClient } from './kit/client/overlayApi'
 import { Market } from './market'
 import { createPassService } from './pass'
-import { createSurgeApp, mockRunJob, startWorker } from './server'
+import { MAX_HEADER_BYTES, createSurgeApp, mockRunJob, startWorker } from './server'
 import { walletFromEnv } from './wallet'
 
 const PORT = Number(process.env.PORT ?? 3000) // hosts inject PORT
@@ -30,7 +31,7 @@ const agents = process.env.AGENT_LLM_KEY === undefined || process.env.AGENT_LLM_
     token: process.env.AGENT_RUN_TOKEN
   })
 
-createSurgeApp(provider, market, passes, agents).listen(PORT, () => {
+createServer({ maxHeaderSize: MAX_HEADER_BYTES }, createSurgeApp(provider, market, passes, agents)).listen(PORT, () => {
   console.log(`SurgeAPI on http://localhost:${PORT}`)
   console.log(`Provider identity key: ${publicKey}`)
   console.log(passes === undefined ? 'Passes disabled (no PASS_TOKEN_ID)' : `Passes enabled: ${tokenId}`)

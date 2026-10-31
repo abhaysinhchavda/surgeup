@@ -25,7 +25,9 @@ import {
   randomBytesHex
 } from '@bsv/wallet-toolbox'
 
-export const memoryKnex = (): Knex => makeKnex({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
+import { MAX_BEEF_DEPTH } from '../../src/wallet'
+
+export const memoryKnex =(): Knex => makeKnex({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
 
 export interface MockChain {
   services: MockServices
@@ -79,6 +81,7 @@ export async function createMockChain (): Promise<MockChain> {
     const provider = new StorageKnex({ chain: 'mock', knex: db, commissionSatoshis: 0, feeModel: { model: 'sat/kb', value: 100 } })
     await provider.migrate('bsv21kit-e2e', randomBytesHex(33))
     await provider.makeAvailable()
+    provider.maxRecursionDepth = MAX_BEEF_DEPTH // as src/wallet.ts sets for the real wallets
     const storage = new WalletStorageManager(rootKey.toPublicKey().toString(), provider)
     await storage.makeAvailable()
     storage.setServices(services)

@@ -10,7 +10,7 @@ import { runAgent } from '../src/agent'
 import { runLlmAgent } from '../src/llmAgent'
 import { createAgentRunner } from '../src/agentRuns'
 import { Market } from '../src/market'
-import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
+import { MAX_HEADER_BYTES, createSurgeApp, mockRunJob, startWorker } from '../src/server'
 import type { PassService } from '../src/pass'
 import { createMockChain, type MockChain } from './helpers/mockchain'
 import { createBrc29Payment } from '../src/payments'
@@ -46,7 +46,7 @@ const waitDone = async (id: string): Promise<any> => {
 let app: (req: any, res: any) => void
 
 beforeAll(async () => {
-  server = await new Promise(resolve => { const s = createServer((req, res) => app(req, res)).listen(PORT, () => resolve(s)) })
+  server = await new Promise(resolve => { const s = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => app(req, res)).listen(PORT, () => resolve(s)) })
   chain = await createMockChain()
   ;[provider, alice, bob] = await Promise.all([chain.makeWallet(), chain.makeWallet(), chain.makeWallet()])
   await chain.fund(alice) // sequential: parallel funding mines two identical mock blocks
@@ -120,6 +120,18 @@ describe('paid jobs', () => {
     const done = await waitDone(body.jobId)
     expect(done.result).toContain('hello')
   })
+
+  // Each payment spends the previous one's unconfirmed change; at wallet-toolbox's
+  // default depth limit (12) the 13th payment failed until a block landed.
+  it('one wallet can pay for many jobs between blocks', async () => {
+    worker = startWorker(market, mockRunJob(1), 5)
+    const carol = await chain.makeWallet()
+    await chain.fund(carol)
+    for (let i = 0; i < 80; i++) {
+      const res = await post(carol, '/job', { prompt: `job ${i}`, bid: 300 })
+      expect(res.status, `payment ${i + 1}`).toBe(200)
+    }
+  }, 120_000)
 
   it('higher later bid is served first', async () => {
     const a = await (await post(alice, '/job', { prompt: 'A', bid: 100 })).json()
