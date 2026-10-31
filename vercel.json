@@ -1,5 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npx vite build web",
-  "outputDirectory": "web/dist"
+  "outputDirectory": "web/dist",
+  "rewrites": [
+    { "source": "/price", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/price" },
+    { "source": "/state", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/state" },
+    { "source": "/provider", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/provider" },
+    { "source": "/pass", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/pass" },
+    { "source": "/job", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/job" },
+    { "source": "/job/:id", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/job/:id" },
+    { "source": "/.well-known/:path*", "destination": "https://mean-components-hdtv-invest.trycloudflare.com/.well-known/:path*" }
+  ]
 }
