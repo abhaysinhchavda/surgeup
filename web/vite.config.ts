@@ -8,6 +8,6 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: Object.fromEntries(['/price', '/state', '/job', '/pass', '/.well-known'].map(path => [path, API]))
+    proxy: Object.fromEntries(['/price', '/state', '/provider', '/agents', '/job', '/pass', '/.well-known'].map(path => [path, API]))
   }
 })

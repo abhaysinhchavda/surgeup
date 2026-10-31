@@ -8,6 +8,7 @@ import { AuthFetch, P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import type { Wallet } from '@bsv/wallet-toolbox'
 import { runAgent } from '../src/agent'
 import { runLlmAgent } from '../src/llmAgent'
+import { createAgentRunner } from '../src/agentRuns'
 import { Market } from '../src/market'
 import { createSurgeApp, mockRunJob, startWorker } from '../src/server'
 import type { PassService } from '../src/pass'
@@ -203,6 +204,26 @@ describe('paid jobs', () => {
     const refused = sent[2].at(-1).content[0]
     expect(refused.is_error).toBe(true)
     expect(refused.content).toContain('over budget')
+  })
+})
+
+describe('dashboard agent runs', () => {
+  it('a finance case bids by deadline, caps at value and stays in budget', async () => {
+    app = createSurgeApp(provider, market, fakePasses, createAgentRunner({ baseUrl: url, wallet: async () => bob, llm: false, token: 'secret' }))
+    const start = async (token: string): Promise<Response> => await fetch(`${url}/agents/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-run-token': token }, body: JSON.stringify({ domain: 'finance', caseId: 'fraud', mode: 'scripted', budgetSats: 500 })
+    })
+    expect((await start('wrong')).status).toBe(401)
+    expect((await start('secret')).status).toBe(200)
+    expect((await start('secret')).status).toBe(409) // one run at a time
+    let run: any
+    for (let i = 0; i < 200 && run?.status !== 'done'; i++) { run = (await getJson('/agents')).run; await new Promise(resolve => setTimeout(resolve, 50)) }
+    // 30s deadline → high: 3×100 = 300. 120s → medium 1.5×150 = 225, over budget → skip. 3600s → low 150 (= its value).
+    expect(run.status).toBe('done')
+    expect(run.spentSats).toBe(450)
+    expect(run.log.filter((l: any) => l.kind === 'pay')).toHaveLength(2)
+    expect(run.log.some((l: any) => l.kind === 'skip' && l.text.includes('over budget'))).toBe(true)
+    expect(market.snapshot().queue.map(j => j.label)).toEqual(['Finance agent', 'Finance agent'])
   })
 })
 

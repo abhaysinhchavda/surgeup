@@ -10,6 +10,8 @@ import { createAuthMiddleware, type AuthRequest } from '@bsv/auth-express-middle
 import { createPaymentMiddleware, type PaymentRequest } from '@bsv/payment-express-middleware'
 import type { Market } from './market'
 import type { PassService } from './pass'
+import type { AgentRunner } from './agentRuns'
+import { DOMAINS } from './cases'
 
 export const MAX_PROMPT = 2000
 export const PASS_SATS = 500
@@ -26,7 +28,7 @@ const prefixOf = (raw: string): string | undefined => {
 const labelFor =(body: any, identityKey: string): string =>
   typeof body?.label === 'string' && body.label.length > 0 ? body.label.slice(0, 24) : identityKey.slice(0, 8)
 
-export function createSurgeApp (provider: WalletInterface, market: Market, passes?: PassService): Express {
+export function createSurgeApp (provider: WalletInterface, market: Market, passes?: PassService, agents?: AgentRunner): Express {
   const app = express()
   app.use(express.json())
 
@@ -59,6 +61,33 @@ export function createSurgeApp (provider: WalletInterface, market: Market, passe
       label: job.label,
       viaPass: job.viaPass
     })
+  })
+
+  // Dashboard-triggered agent runs. They spend the agent wallet, not the
+  // caller's, so they are plain routes: one run at a time, capped budget, and an
+  // optional AGENT_RUN_TOKEN for a public deployment.
+  app.get('/agents', (_req, res) => {
+    res.json({ enabled: agents !== undefined, llm: agents?.llm ?? false, tokenRequired: agents?.tokenRequired ?? false, domains: DOMAINS, run: agents?.current() })
+  })
+  app.get('/agents/wallet', async (_req, res) => {
+    if (agents === undefined) return res.status(501).json({ error: 'agents disabled' })
+    try {
+      const w = await agents.wallet()
+      const { outputs } = await w.listOutputs({ basket: 'default', limit: 1000 })
+      res.json({
+        identityKey: (await w.getPublicKey({ identityKey: true })).publicKey,
+        sats: outputs.filter(o => o.spendable).reduce((s, o) => s + o.satoshis, 0)
+      })
+    } catch (e) {
+      res.status(500).json({ error: String(e) })
+    }
+  })
+  app.post('/agents/run', (req, res) => {
+    if (agents === undefined) return res.status(501).json({ error: 'agents disabled: set AGENT_LLM_KEY on the server' })
+    if (!agents.checkToken(req.get('x-run-token'))) return res.status(401).json({ error: 'run token required' })
+    const r = agents.start(req.body ?? {})
+    if ('error' in r) return res.status(r.status).json({ error: r.error })
+    res.json(r)
   })
 
   // Auth before the checks: AuthFetch rejects any unsigned response, so even a

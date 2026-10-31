@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
 import type { WalletInterface } from '@bsv/sdk'
 import { submitJob } from './agent'
+import type { Log } from './agentRuns'
 import { walletFromEnv } from './wallet'
 
 export interface Budget { limitSats: number, spentSats: number }
@@ -20,7 +21,6 @@ export function guardBid (budget: Budget, bid: number): { ok: true } | { ok: fal
 }
 
 const MAX_TURNS = 20
-const LABEL = 'LLM agent'
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_price',
@@ -39,9 +39,13 @@ const TOOLS: Anthropic.Tool[] = [
   }
 ]
 
-export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string, tasks: Task[], budgetSats: number, model?: string, client?: Anthropic }): Promise<void> {
+/** CLI output: one `[LLM]` line per event, with a WhatsOnChain link for payments. */
+const consoleLog: Log = (_kind, text, txid) => { console.log(`[LLM] ${text}${txid === undefined ? '' : `  https://whatsonchain.com/tx/${txid}`}`) }
+
+export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string, tasks: Task[], budgetSats: number, model?: string, client?: Anthropic, label?: string, log?: Log, budget?: Budget }): Promise<void> {
   const client = o.client ?? new Anthropic()
-  const budget: Budget = { limitSats: o.budgetSats, spentSats: 0 }
+  const budget: Budget = o.budget ?? { limitSats: o.budgetSats, spentSats: 0 }
+  const log = o.log ?? consoleLog
   const system = `You are a purchasing agent with a budget of ${o.budgetSats} sats. For each task decide whether it is worth paying for now, given its value and deadline and the current surge price. Never bid more than a task's value. Bid higher only when the deadline is close. Use the tools; explain each decision in one sentence.`
 
   // Tool calls run one at a time, so the budget check and the spend cannot interleave.
@@ -50,11 +54,11 @@ export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string
     if (name === 'check_job') return { body: await (await fetch(`${o.baseUrl}/job/${encodeURIComponent(String(input?.jobId))}`)).json() }
     if (name === 'submit_job') {
       const guard = guardBid(budget, input?.bid)
-      if (!guard.ok) return { body: { error: guard.reason }, isError: true }
-      const r = await submitJob(o.wallet, o.baseUrl, String(input.prompt), input.bid, LABEL)
+      if (!guard.ok) { log('skip', `refused bid of ${String(input?.bid)}: ${guard.reason}`); return { body: { error: guard.reason }, isError: true } }
+      const r = await submitJob(o.wallet, o.baseUrl, String(input.prompt), input.bid, o.label ?? 'LLM agent')
       if (r.status !== 200) return { body: r.body, isError: true }
       budget.spentSats += r.body.paidSats
-      console.log(`[LLM] paid ${r.body.paidSats} sats  https://whatsonchain.com/tx/${r.body.txid}`)
+      log('pay', `paid ${r.body.paidSats} sats, queue position ${r.body.position}`, r.body.txid)
       return { body: r.body }
     }
     return { body: { error: `unknown tool ${name}` }, isError: true }
@@ -66,11 +70,11 @@ export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string
   }]
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await client.messages.create({ model: o.model ?? 'claude-haiku-5-5', max_tokens: 16000, system, tools: TOOLS, messages })
-    for (const b of res.content) if (b.type === 'text' && b.text.trim() !== '') console.log(`[LLM] ${b.text.trim()}`)
+    for (const b of res.content) if (b.type === 'text' && b.text.trim() !== '') log('think', b.text.trim())
     messages.push({ role: 'assistant', content: res.content })
     if (res.stop_reason === 'pause_turn') continue
     if (res.stop_reason !== 'tool_use') {
-      if (res.stop_reason === 'refusal') console.log('[LLM] the model declined to continue')
+      if (res.stop_reason === 'refusal') log('info', 'the model declined to continue')
       break
     }
     const results: Anthropic.ToolResultBlockParam[] = []
@@ -82,7 +86,7 @@ export async function runLlmAgent (o: { wallet: WalletInterface, baseUrl: string
     }
     messages.push({ role: 'user', content: results })
   }
-  console.log(`[LLM] spent ${budget.spentSats} of ${budget.limitSats} sats`)
+  log('info', `spent ${budget.spentSats} of ${budget.limitSats} sats`)
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
