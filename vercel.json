@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/:route(price|state|provider|agents|pass|job|\\.well-known)/:rest*",
-      "destination": "https://bluetooth-ken-statutes-oscar.trycloudflare.com/:route/:rest*"
+      "destination": "https://pee-coaching-possibly-image.trycloudflare.com/:route/:rest*"
     }
   ]
 }
