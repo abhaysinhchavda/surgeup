@@ -19,6 +19,7 @@
     "deploy-pass": "tsx --env-file=.env scripts/deployPass.ts",
     "resell": "tsx --env-file=.env scripts/resell.ts",
     "pass": "tsx --env-file=.env scripts/pass.ts",
+    "tunnel": "tsx scripts/tunnel.ts",
     "web": "vite web",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
