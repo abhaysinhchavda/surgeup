@@ -5,7 +5,7 @@
  */
 import { AuthFetch, WalletClient } from '@bsv/sdk'
 import type { Job, MarketSnapshot } from '../src/market'
-import type { Domain } from '../src/cases'
+import type { AgentCase, Domain } from '../src/cases'
 import type { AgentRun } from '../src/agentRuns'
 import type { NetworkStats } from '../src/server'
 import { createBrc29Payment, type Brc29Payment } from '../src/payments'
@@ -82,6 +82,7 @@ function renderMarket (s: MarketSnapshot): void {
     p.textContent = String(price)
     p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash')
     lastPrice = price
+    previews.forEach(f => { f() })
   }
   const mult = price / BASE_SATS
   el('surge').dataset.level = mult >= 2.5 ? 'hot' : mult >= 1.5 ? 'warm' : 'base'
@@ -131,11 +132,28 @@ let picks: Record<string, Pick> = {}
 let agentsEnabled = false
 let llmAvailable = false
 let walletSats: number | undefined
+let previews: Array<() => void> = [] // one per agent card: its spend preview at the live surge
+
+const URGENCY_X = { high: 3, medium: 1.5, low: 1 }
+/** What the rule-based agent would do at the current surge price: the same rules as runScripted on the server. */
+function previewSpend (ac: AgentCase, budget: number): { spend: number, paid: number, overBudget: number, tooPricey: number } {
+  const surge = lastPrice ?? BASE_SATS
+  const e = { spend: 0, paid: 0, overBudget: 0, tooPricey: 0 }
+  for (const t of ac.tasks) {
+    const bid = Math.min(Math.ceil(surge * URGENCY_X[urgencyOf(t.deadlineSec)]), t.valueSats)
+    if (bid < surge) { e.tooPricey++; continue }
+    if (e.spend + bid > budget) { e.overBudget++; continue }
+    e.spend += bid
+    e.paid++
+  }
+  return e
+}
 
 const savePicks = (): void => { try { localStorage.setItem(STORE_KEY, JSON.stringify(picks)) } catch {} }
 const loadPicks = (): Record<string, Pick> => { try { return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') } catch { return {} } }
 
 function renderRoster (): void {
+  previews = []
   el('roster').replaceChildren(...domains.map(d => {
     const p = picks[d.id]
     const c = d.cases.find(x => x.id === p.caseId) ?? d.cases[0]
@@ -180,7 +198,18 @@ function renderRoster (): void {
     }
     brain.append(modeBtn('scripted', 'Rules'), modeBtn('llm', 'Claude'))
 
-    card.append(head, select, brief, chips, h('div', { className: 'agent-foot' }, range, brain))
+    const est = h('p', { className: 'est' })
+    previews.push(() => {
+      const ac = d.cases.find(x => x.id === p.caseId) ?? d.cases[0]
+      if (p.mode === 'llm') { est.className = 'est'; est.textContent = `Claude picks each bid, never past ${p.budgetSats} sats`; return }
+      const e = previewSpend(ac, p.budgetSats)
+      const skipped = [e.overBudget > 0 ? `${e.overBudget} skipped: budget too low` : '', e.tooPricey > 0 ? `${e.tooPricey} skipped: surge above its worth` : ''].filter(Boolean)
+      est.className = skipped.length > 0 ? 'est warn' : 'est'
+      est.replaceChildren(`At ${lastPrice ?? BASE_SATS} sats surge: pays `, h('b', { className: 'num', textContent: `~${e.spend}` }), ` for ${e.paid}/${ac.tasks.length} tasks · `,
+        skipped.length > 0 ? skipped.join(' · ') : `${p.budgetSats - e.spend} unused`)
+    })
+
+    card.append(head, select, brief, chips, h('div', { className: 'agent-foot' }, range, brain), est)
     return card
   }))
   changed()
@@ -188,6 +217,7 @@ function renderRoster (): void {
 
 function changed (): void {
   savePicks()
+  previews.forEach(f => { f() })
   const on = domains.filter(d => picks[d.id].on)
   const total = on.reduce((s, d) => s + picks[d.id].budgetSats, 0)
   const summary = el('summary')
