@@ -141,8 +141,7 @@
     .row-market { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.2fr); gap: 16px; }
     .row-market .net-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
     .row-market .net-grid .v { font-size: 24px; }
-    .row-act { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.6fr); gap: 16px; align-items: start; }
-    .row-act > [aria-label="Pay for a job yourself"] { position: sticky; top: 16px; }
+    .row-act { display: grid; gap: 16px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
     th { font-size: 11px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
@@ -155,8 +154,7 @@
     .scroll { max-height: 320px; overflow-y: auto; }
 
     /* Pay form */
-    form.pay { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
-    form.pay .field:first-child { grid-column: 1 / -1; }
+    form.pay { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 12px; align-items: end; }
     .field input { font: inherit; font-size: 15px; padding: 10px 12px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); min-width: 0; }
     .field input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
     #result { white-space: pre-wrap; margin: 10px 0 0; padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
@@ -167,10 +165,10 @@
       .console { grid-template-columns: 1fr; }
       .row-market { grid-template-columns: 1fr 1fr; } .row-market > [aria-label="Network impact"] { grid-column: 1 / -1; }
       .row-market .net-grid { grid-template-columns: repeat(3, 1fr); }
-      .row-act { grid-template-columns: 1fr; } .row-act > [aria-label="Pay for a job yourself"] { position: static; }
     }
     @media (max-width: 720px) {
       .row-market, .roster { grid-template-columns: 1fr; }
+      form.pay { grid-template-columns: minmax(0, 1fr) auto; } form.pay .field:first-child { grid-column: 1 / -1; }
       .controls { grid-template-columns: 1fr; }
       .row-market .net-grid { grid-template-columns: repeat(2, 1fr); } .row-market .net-grid .v { font-size: 22px; }
       .surge { grid-template-columns: 1fr; } .surge .value { font-size: 42px; }
